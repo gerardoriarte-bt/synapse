@@ -16,7 +16,7 @@ class SnowflakeService:
             schema=os.getenv(f'SCHEMA_{tenant_id.upper()}', 'PUBLIC')
         )
 
-    def process_query(self, query: str) -> SynapseResponse:
+    def process_query(self, query: str, history: list = []) -> SynapseResponse:
         cursor = self.conn.cursor()
         try:
             # 1. Recuperación de Datos Reales (Data Fetching)
@@ -24,13 +24,9 @@ class SnowflakeService:
             chart_config = None
             render_type = "text"
 
-            # Simulación de detección de intención (Keyword check rápido)
             if any(keyword in query.upper() for keyword in ["ROAS", "PAUTA", "GASTO"]):
-                # SQL Real en tu tabla (Asumiendo FACT_MARKETING según backend.md)
                 cursor.execute("SELECT SEMANA, ROAS, GASTO FROM FACT_MARKETING ORDER BY SEMANA DESC LIMIT 5")
                 rows = cursor.fetchall()
-                
-                # Transformamos a JSON plano para que la IA lo entienda
                 raw_data = [{"semana": str(row[0]), "roas": float(row[1]), "gasto": float(row[2])} for row in rows]
                 render_type = "chart"
                 chart_config = ChartConfig(
@@ -40,20 +36,21 @@ class SnowflakeService:
                     metrics_label="ROAS"
                 )
 
-            # 2. Análisis del Datos con Cortex AI (Analytic Reasoning)
-            # Pasamos los DATOS REALES como contexto al modelo para que la respuesta no sea alucinada.
-            data_context = f"DATOS REALES RECUPERADOS: {raw_data}" if raw_data else "Sin datos adicionales detectados."
-            
+            # 2. Análisis del Datos con Cortex AI + MEMORIA (Analytic Reasoning)
+            data_context = f"DATOS REALES RECUPERADOS: {raw_data}" if raw_data else "Sin datos adicionales."
+            history_context = "\n".join([f"User: {h['q']}\nAssistant: {h['a']}" for h in history])
+
             prompt = f"""
-            Actúa como un Analista de Marketing Senior en el equipo de Synapse.
-            CONTEXTO DE DATOS: {data_context}
+            Actúa como un Analista de Marketing Senior en el equipo de Synapse. Solo responde con la narrativa. No digas 'Hola'.
+            HISTORIAL DE CONVERSACIÓN:
+            {history_context}
+
+            CONTEXTO DE DATOS ACTUALES: {data_context}
             PREGUNTA DEL USUARIO: {query}
             
             INSTRUCCIONES:
-            - Si hay datos disponibles, descríbelos y destaca tendencias o anomalías.
-            - Si el ROAS es bajo (menor a 2.0), sugiere una acción correctiva.
-            - Sé ejecutivo, directo y evita introducciones genéricas.
-            - Tu respuesta poblará el campo 'narrative' de una UI avanzada.
+            - Sé ejecutivo, directo y enfocado en los datos.
+            - Si hay historial, mantén la coherencia con lo hablado anteriormente.
             """
             
             cursor.execute(f"SELECT SNOWFLAKE.CORTEX.COMPLETE('mistral-large', '{prompt}')")
