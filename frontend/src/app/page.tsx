@@ -32,55 +32,71 @@ export default function Home() {
               <p className="text-zinc-500 max-w-md mx-auto italic">Pregunta sobre ROAS, anomalías de tráfico o eficiencia de pauta.</p>
             </div>
             <div className="flex gap-2">
-              <SuggestionChip text="¿Cómo ha variado el ROAS este mes?" onClick={() => askSynapse('¿Cómo ha variado el ROAS este mes?')} />
-              <SuggestionChip text="Alertas críticas hoy" onClick={() => askSynapse('Ver alertas críticas')} />
+              <SuggestionChip text="¿Cómo ha variado el ROAS este mes?" onClick={() => { setQuery('¿Cómo ha variado el ROAS este mes?'); handleSubmit({ preventDefault: () => {} } as React.FormEvent); }} />
+              <SuggestionChip text="Alertas críticas hoy" onClick={() => { setQuery('Ver alertas críticas'); handleSubmit({ preventDefault: () => {} } as React.FormEvent); }} />
             </div>
           </div>
         )}
 
-        {/* Loading State */}
+        {/* Lista de mensajes con padding optimizado */}
+      <div className="flex-grow space-y-12 pb-32">
+        {messages.map((msg, idx) => (
+          <div 
+            key={idx} 
+            className={`flex flex-col space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-700 delay-${idx * 100}`}
+          >
+            {/* Burbuja del Usuario: Elegante y minimalista */}
+            <div className="flex justify-start">
+              <div className="max-w-[85%] px-6 py-4 rounded-3xl bg-zinc-900/40 border border-zinc-800 text-zinc-100 shadow-sm backdrop-blur-md">
+                <p className="text-sm font-medium leading-relaxed">{msg.query}</p>
+                <span className="text-[10px] text-zinc-600 font-bold uppercase tracking-widest mt-3 block">User Query</span>
+              </div>
+            </div>
+
+            {/* Burbuja de Synapse: Expandida y rica en visualización */}
+            <div className="flex flex-col space-y-4">
+              <div className="flex items-center gap-3 mb-2 translate-x-1">
+                <div className="w-6 h-6 rounded-full bg-indigo-500/10 border border-indigo-400/30 flex items-center justify-center">
+                  <Activity size={12} className="text-indigo-400" />
+                </div>
+                <span className="text-[10px] font-black text-indigo-400 uppercase tracking-[0.2em]">Synapse Intelligence Agent</span>
+              </div>
+              
+              <div className="pl-9 space-y-6">
+                <DynamicRenderer data={msg.response} />
+              </div>
+            </div>
+          </div>
+        ))}
         {isLoading && <SkeletonLoader />}
-
-        {/* Error State */}
-        {error && (
-          <div className="p-4 bg-red-950/20 border border-red-900/50 rounded-xl text-red-400 text-sm italic">
-            {error}
-          </div>
-        )}
-
-        {/* Response State */}
-        {response && !isLoading && (
-          <div className="space-y-8">
-             <DynamicRenderer data={response} />
-          </div>
-        )}
+        <div ref={messagesEndRef} />
       </div>
 
-      {/* Input Flotante / Barra de Comandos */}
-      <div className="fixed bottom-10 left-1/2 -translate-x-1/2 w-full max-w-3xl px-6">
-        <form 
-          onSubmit={handleSubmit}
-          className="relative group flex items-center bg-zinc-900/60 backdrop-blur-xl border border-zinc-800 p-2 pl-4 rounded-2xl shadow-2xl focus-within:border-indigo-500/50 transition-all duration-300"
-        >
-          <Command className="text-zinc-600 mr-2" size={18} />
-          <input 
-            type="text" 
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            placeholder="Analizar datos de pauta histórica..."
-            className="flex-grow bg-transparent border-none outline-none text-sm text-zinc-100 placeholder:text-zinc-600 h-10"
-          />
-          <button 
-            type="submit"
-            className="bg-indigo-600 hover:bg-indigo-500 text-white p-2 rounded-xl transition-all shadow-lg active:scale-95 disabled:opacity-50"
-            disabled={!query.trim()}
-          >
-            <Send size={18} />
-          </button>
-        </form>
-        <div className="mt-3 text-[10px] text-center text-zinc-600 uppercase tracking-widest font-bold">
-          Empowering Data Decisions • AI Engine v2.0
+      {/* Input de Chat: Glassmorphism y profundidad visual */}
+      <div className="fixed bottom-10 left-1/2 -translate-x-1/2 w-full max-w-3xl px-6 z-30">
+        <div className="relative group">
+          <div className="absolute -inset-1 bg-gradient-to-r from-indigo-500/20 to-purple-500/20 rounded-[28px] blur-xl opacity-0 group-hover:opacity-100 transition duration-1000 group-focus-within:opacity-100" />
+          <div className="relative flex items-center gap-3 p-2 bg-zinc-900/60 backdrop-blur-2xl border border-white/10 rounded-[24px] shadow-2xl transition-all duration-500 group-focus-within:border-white/20">
+            <input
+              type="text"
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              onKeyDown={(e) => e.key === 'Enter' && handleSubmit(e)}
+              placeholder="Ask Synapse for marketing insights (e.g., 'What's our ROAS?')..."
+              className="flex-grow bg-transparent border-none outline-none px-5 py-3 text-sm text-zinc-100 placeholder-zinc-500 font-medium"
+            />
+            <button
+              onClick={handleSubmit}
+              disabled={isLoading || !query.trim()}
+              className="p-3 bg-white text-black rounded-2xl hover:bg-zinc-200 disabled:opacity-30 disabled:hover:bg-white transition-all duration-300 shadow-lg"
+            >
+              <Send size={20} />
+            </button>
+          </div>
         </div>
+        <p className="text-[10px] text-center text-zinc-600 mt-4 uppercase tracking-widest font-black">
+          Powered by Snowflake Cortex AI & Buentipo Analytics
+        </p>
       </div>
     </SynapseChatLayout>
   );
