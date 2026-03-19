@@ -1,0 +1,45 @@
+@import "tailwindcss";
+
+@theme {
+  --color-background: #000000;
+  --color-foreground: #ededed;
+}
+
+@layer base {
+  :root {
+    --background: #000000;
+    --foreground: #ededed;
+  }
+
+  body {
+    background-color: var(--background);
+    color: var(--foreground);
+    @apply antialiased;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif, "Apple Color Emoji", "Segoe UI Emoji";
+  }
+
+  /* Reset global de bordes compatible con v4 */
+  * {
+    border-color: #27272a; /* Equivalente a zinc-800 */
+  }
+}
+
+/* Custom styles for corporate dark mode */
+.scrollbar-hide::-webkit-scrollbar {
+  display: none;
+}
+.scrollbar-hide {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
+@keyframes zoom-in-95 {
+  from {
+    transform: scale(0.95);
+    opacity: 0;
+  }
+}
+
+.animate-in {
+  animation: zoom-in-95 0.3s ease-out;
+}
