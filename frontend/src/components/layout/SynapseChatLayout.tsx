@@ -4,9 +4,10 @@ import { BarChart3, LayoutDashboard, Settings, HelpCircle, Activity } from 'luci
 
 interface Props {
   children: ReactNode;
+  onViewChange?: (view: string) => void;
 }
 
-export const SynapseChatLayout: React.FC<Props> = ({ children }) => {
+export const SynapseChatLayout: React.FC<Props> = ({ children, onViewChange }) => {
   return (
     <div className="flex h-screen bg-black text-zinc-100 overflow-hidden font-sans">
       {/* Sidebar Corporativo Premium */}
@@ -27,8 +28,17 @@ export const SynapseChatLayout: React.FC<Props> = ({ children }) => {
         </div>
 
         <nav className="flex-grow space-y-2">
-          <SidebarItem icon={<LayoutDashboard size={19} />} label="Data Overview" active />
-          <SidebarItem icon={<BarChart3 size={19} />} label="Marketing Intelligence" />
+          <SidebarItem 
+            icon={<LayoutDashboard size={19} />} 
+            label="Analytic Chat" 
+            active 
+            onClick={() => onViewChange?.('chat')}
+          />
+          <SidebarItem 
+            icon={<BarChart3 size={19} />} 
+            label="Marketing Intelligence" 
+            onClick={() => onViewChange?.('intelligence')}
+          />
           <SidebarItem icon={<Activity size={19} />} label="Alerts & Trends" />
           <div className="pt-6 pb-2 px-3 text-[10px] font-bold text-zinc-600 uppercase tracking-widest">Workspace</div>
           <SidebarItem icon={<Settings size={19} />} label="Configurations" />

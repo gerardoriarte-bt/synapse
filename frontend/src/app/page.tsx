@@ -3,9 +3,10 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { SynapseChatLayout } from '@/components/layout/SynapseChatLayout';
 import { DynamicRenderer } from '@/components/modules/DynamicRenderer';
+import { IntelligenceDashboard } from '@/components/modules/IntelligenceDashboard';
 import { SkeletonLoader } from '@/components/shared/SkeletonLoader';
 import { useSynapseQuery } from '@/hooks/useSynapseQuery';
-import { Send, Zap, Activity } from 'lucide-react';
+import { Send, Zap, Activity, Sparkles } from 'lucide-react';
 
 interface ChatMessage {
   query: string;
@@ -13,8 +14,11 @@ interface ChatMessage {
 }
 
 export default function Home() {
+  const [view, setView] = useState<'chat' | 'intelligence'>('chat');
   const [query, setQuery] = useState('');
   const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const [intelligenceData, setIntelligenceData] = useState<any>(null);
+  
   const { askSynapse, isLoading, response, error } = useSynapseQuery();
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
@@ -24,7 +28,11 @@ export default function Home() {
 
   useEffect(() => {
     if (response) {
-      setMessages(prev => [...prev, { query: prev[prev.length - 1]?.query || "Última consulta", response }]);
+      if (view === 'chat') {
+        setMessages(prev => [...prev, { query: prev[prev.length - 1]?.query || "Última consulta", response }]);
+      } else {
+        setIntelligenceData(response);
+      }
       scrollToBottom();
     }
   }, [response]);
@@ -32,114 +40,119 @@ export default function Home() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!query.trim()) return;
-    
-    // Añadimos la pregunta al estado visual inmediatamente
     const currentQuery = query;
     setQuery('');
-    
-    // Llamada al API
     await askSynapse(currentQuery);
   };
 
+  const generateIntelligence = async () => {
+    setView('intelligence');
+    await askSynapse("GENERATE STRATEGIC INTELLIGENCE REPORT");
+  };
+
   return (
-    <SynapseChatLayout>
+    <SynapseChatLayout onViewChange={(v) => setView(v as 'chat' | 'intelligence')}>
       <div className="flex flex-col min-h-full">
-        {/* Empty State / Welcome */}
-        {messages.length === 0 && !isLoading && (
-          <div className="flex flex-col items-center justify-center pt-20 text-center space-y-6">
-            <div className="w-16 h-16 rounded-2xl bg-zinc-900 border border-zinc-800 flex items-center justify-center shadow-xl">
-              <Zap className="text-zinc-600 fill-zinc-600" size={32} />
+        {view === 'intelligence' ? (
+          <div className="space-y-10">
+             <IntelligenceDashboard data={intelligenceData} isLoading={isLoading} />
+             {messages.length > 0 && (
+                <div className="pt-10 border-t border-zinc-900">
+                  <h3 className="text-xs font-bold text-zinc-600 uppercase tracking-widest mb-6 px-4">Knowledge Base (Previous Context)</h3>
+                  <div className="space-y-4 opacity-50 grayscale hover:grayscale-0 transition-all duration-500">
+                     {messages.slice(-2).map((m, i) => (
+                       <div key={i} className="p-4 bg-zinc-900/20 border border-zinc-800 rounded-2xl text-[11px]">
+                         <strong>Q:</strong> {m.query}
+                       </div>
+                     ))}
+                  </div>
+                </div>
+             )}
+          </div>
+        ) : (
+          /* VISTA DE CHAT (Existente) */
+          <div className="flex flex-col space-y-12">
+            {messages.length === 0 && !isLoading && (
+              <div className="flex flex-col items-center justify-center pt-20 text-center space-y-8 animate-in fade-in zoom-in duration-700">
+                <div className="w-20 h-20 rounded-[2.5rem] bg-indigo-600/10 border border-indigo-500/20 flex items-center justify-center shadow-2xl shadow-indigo-500/10 relative overflow-hidden">
+                   <div className="absolute inset-0 bg-gradient-to-tr from-indigo-500/10 to-transparent animate-pulse" />
+                   <Sparkles className="text-indigo-400" size={36} />
+                </div>
+                <div className="space-y-3">
+                  <h1 className="text-5xl font-black tracking-tighter text-white">Advanced Analytics</h1>
+                  <p className="text-zinc-500 max-w-sm mx-auto font-medium leading-relaxed">
+                    Consult your business data in real-time using Snowflake Cortex AI intelligence.
+                  </p>
+                </div>
+                <div className="flex flex-wrap justify-center gap-3 max-w-xl">
+                  <SuggestionChip text="Perform Strategic Analysis" onClick={generateIntelligence} highlight />
+                  <SuggestionChip text="Weekly ROAS Performance" onClick={() => { setQuery('¿Cómo ha variado el ROAS las últimas semanas?'); }} />
+                  <SuggestionChip text="Anomaly Detection" onClick={() => { setQuery('Busca anomalías de gasto ayer'); }} />
+                </div>
+              </div>
+            )}
+
+            <div className="flex-grow space-y-16 pb-40">
+              {messages.map((msg, idx) => (
+                <div key={idx} className="flex flex-col space-y-8 animate-in fade-in slide-in-from-bottom-6 duration-1000">
+                  <div className="flex justify-start">
+                    <div className="max-w-[85%] px-8 py-5 rounded-[2rem] bg-zinc-900/40 border border-zinc-800/50 text-zinc-100 shadow-sm backdrop-blur-md">
+                      <p className="text-[15px] font-medium leading-relaxed tracking-tight">{msg.query}</p>
+                      <span className="text-[10px] text-zinc-600 font-black uppercase tracking-[0.2em] mt-4 block opacity-50">Query Registered</span>
+                    </div>
+                  </div>
+
+                  <div className="flex flex-col space-y-6">
+                    <div className="flex items-center gap-4 mb-2 pl-2">
+                      <div className="w-8 h-8 rounded-xl bg-indigo-500/10 border border-indigo-400/20 flex items-center justify-center shadow-inner">
+                        <Activity size={14} className="text-indigo-400" />
+                      </div>
+                      <span className="text-[11px] font-black text-indigo-400/80 uppercase tracking-[0.25em]">Cortex Analyst Engine</span>
+                    </div>
+                    <div className="pl-12 space-y-8 border-l-2 border-zinc-900/50 ml-4">
+                      <DynamicRenderer data={msg.response} />
+                    </div>
+                  </div>
+                </div>
+              ))}
+              {isLoading && <div className="space-y-6 pt-6 pl-12"><SkeletonLoader /></div>}
+              {error && <div className="p-6 bg-red-950/10 border border-red-900/20 rounded-3xl text-red-500 text-xs italic ml-12">{error}</div>}
+              <div ref={messagesEndRef} />
             </div>
-            <div className="space-y-2">
-              <h1 className="text-4xl font-bold tracking-tight text-white">¿Qué quieres analizar hoy?</h1>
-              <p className="text-zinc-500 max-w-md mx-auto italic">Pregunta sobre ROAS, anomalías de tráfico o eficiencia de pauta.</p>
-            </div>
-            <div className="flex gap-2">
-              <SuggestionChip text="¿Cómo ha variado el ROAS este mes?" onClick={() => { setQuery('¿Cómo ha variado el ROAS este mes?'); }} />
-              <SuggestionChip text="Alertas críticas hoy" onClick={() => { setQuery('Ver alertas críticas'); }} />
-            </div>
+
+            {/* Input Estilo Comando */}
+            <form onSubmit={handleSubmit} className="fixed bottom-12 left-1/2 -translate-x-1/2 w-full max-w-3xl px-6 z-40">
+              <div className="relative group">
+                <div className="absolute -inset-1 bg-gradient-to-r from-indigo-500/10 to-indigo-900/10 rounded-[2rem] blur-2xl opacity-0 group-focus-within:opacity-100 transition duration-1000" />
+                <div className="relative flex items-center gap-3 p-2 bg-black/60 backdrop-blur-3xl border border-white/5 rounded-[1.8rem] shadow-2xl transition-all duration-300 group-focus-within:border-white/10 group-focus-within:bg-black/80">
+                  <input
+                    type="text"
+                    value={query}
+                    onChange={(e) => setQuery(e.target.value)}
+                    placeholder="Enter analytical command..."
+                    className="flex-grow bg-transparent border-none outline-none px-6 py-4 text-sm text-zinc-200 placeholder-zinc-600 font-semibold tracking-tight"
+                  />
+                  <button type="submit" disabled={isLoading || !query.trim()} className="p-4 bg-white text-black rounded-2xl hover:bg-zinc-200 disabled:opacity-30 transition-all shadow-xl active:scale-90">
+                    <Send size={20} />
+                  </button>
+                </div>
+              </div>
+            </form>
           </div>
         )}
-
-        {/* Lista de mensajes con padding optimizado */}
-        <div className="flex-grow space-y-16 pb-32">
-          {messages.map((msg, idx) => (
-            <div 
-              key={idx} 
-              className="flex flex-col space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-700"
-            >
-              {/* Burbuja del Usuario: Elegante y minimalista */}
-              <div className="flex justify-start">
-                <div className="max-w-[85%] px-6 py-4 rounded-3xl bg-zinc-900/40 border border-zinc-800 text-zinc-100 shadow-sm backdrop-blur-md">
-                  <p className="text-sm font-medium leading-relaxed">{msg.query}</p>
-                  <span className="text-[10px] text-zinc-600 font-bold uppercase tracking-widest mt-3 block">User Query</span>
-                </div>
-              </div>
-
-              {/* Burbuja de Synapse: Expandida y rica en visualización */}
-              <div className="flex flex-col space-y-4">
-                <div className="flex items-center gap-3 mb-2 translate-x-1">
-                  <div className="w-6 h-6 rounded-full bg-indigo-500/10 border border-indigo-400/30 flex items-center justify-center">
-                    <Activity size={12} className="text-indigo-400" />
-                  </div>
-                  <span className="text-[10px] font-black text-indigo-400 uppercase tracking-[0.2em]">Intelligence Agent Result</span>
-                </div>
-                
-                <div className="pl-9 space-y-6">
-                  <DynamicRenderer data={msg.response} />
-                </div>
-              </div>
-            </div>
-          ))}
-          
-          {isLoading && <div className="space-y-4 pt-4"><SkeletonLoader /></div>}
-          
-          {error && (
-            <div className="p-4 bg-red-950/20 border border-red-900/30 rounded-2xl text-red-400 text-xs italic ml-9">
-              {error}
-            </div>
-          )}
-          
-          <div ref={messagesEndRef} />
-        </div>
-
-        {/* Input de Chat: Glassmorphism y profundidad visual */}
-        <form 
-          onSubmit={handleSubmit}
-          className="fixed bottom-10 left-1/2 -translate-x-1/2 w-full max-w-3xl px-6 z-30"
-        >
-          <div className="relative group">
-            <div className="absolute -inset-1 bg-gradient-to-r from-indigo-500/10 to-purple-500/10 rounded-[28px] blur-xl opacity-0 group-hover:opacity-100 transition duration-1000 group-focus-within:opacity-100" />
-            <div className="relative flex items-center gap-3 p-2 bg-zinc-900/60 backdrop-blur-2xl border border-white/10 rounded-[24px] shadow-2xl transition-all duration-500 group-focus-within:border-white/20">
-              <input
-                type="text"
-                value={query}
-                onChange={(e) => setQuery(e.target.value)}
-                placeholder="Ask Synapse for marketing insights..."
-                className="flex-grow bg-transparent border-none outline-none px-5 py-3 text-sm text-zinc-100 placeholder-zinc-500 font-medium"
-              />
-              <button
-                type="submit"
-                disabled={isLoading || !query.trim()}
-                className="p-3 bg-white text-black rounded-2xl hover:bg-zinc-200 disabled:opacity-30 disabled:hover:bg-white transition-all duration-300 shadow-lg active:scale-95"
-              >
-                <Send size={20} />
-              </button>
-            </div>
-          </div>
-          <p className="text-[10px] text-center text-zinc-600 mt-4 uppercase tracking-widest font-black">
-            Powered by Snowflake Cortex AI & Buentipo Analytics
-          </p>
-        </form>
       </div>
     </SynapseChatLayout>
   );
 }
 
-const SuggestionChip = ({ text, onClick }: { text: string; onClick: () => void }) => (
+const SuggestionChip = ({ text, onClick, highlight = false }: { text: string; onClick: () => void; highlight?: boolean }) => (
   <button 
     onClick={onClick}
-    className="px-4 py-2 bg-zinc-900/50 border border-zinc-800 rounded-lg text-xs font-semibold text-zinc-400 hover:border-zinc-700 hover:text-zinc-200 transition-all active:scale-95"
+    className={`px-5 py-3 rounded-2xl text-[11px] font-black uppercase tracking-widest transition-all active:scale-95 border ${
+      highlight 
+        ? 'bg-indigo-600 text-white border-indigo-400 shadow-lg shadow-indigo-600/20 hover:bg-indigo-500' 
+        : 'bg-zinc-900/40 border-zinc-800 text-zinc-500 hover:border-zinc-700 hover:text-zinc-300'
+    }`}
   >
     {text}
   </button>
