@@ -76,8 +76,10 @@ export const SynapseChatLayout: React.FC<Props> = ({ children, onViewChange }) =
   );
 };
 
-const SidebarItem = ({ icon, label, active = false }: { icon: React.ReactNode; label: string; active?: boolean }) => (
-  <button className={`w-full flex items-center gap-4 px-4 py-3 rounded-xl text-sm font-semibold transition-all duration-300 group ${
+const SidebarItem = ({ icon, label, active = false, onClick }: { icon: React.ReactNode; label: string; active?: boolean; onClick?: () => void }) => (
+  <button 
+    onClick={onClick}
+    className={`w-full flex items-center gap-4 px-4 py-3 rounded-xl text-sm font-semibold transition-all duration-300 group ${
     active 
       ? 'bg-zinc-100/10 text-white border border-zinc-800 shadow-[0_0_15px_rgba(99,102,241,0.05)]' 
       : 'text-zinc-500 hover:bg-zinc-100/5 hover:text-zinc-300'
