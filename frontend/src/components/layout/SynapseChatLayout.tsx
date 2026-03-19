@@ -12,18 +12,15 @@ export const SynapseChatLayout: React.FC<Props> = ({ children, onViewChange }) =
     <div className="flex h-screen bg-black text-zinc-100 overflow-hidden font-sans">
       {/* Sidebar Corporativo Premium */}
       <aside className="w-72 border-r border-zinc-900 flex flex-col p-6 space-y-10 bg-[#050505]/80 backdrop-blur-xl">
-        <div className="flex items-center gap-4 px-2">
-          <div className="relative w-10 h-10 overflow-hidden rounded-xl border border-zinc-800 bg-white/5 backdrop-blur-sm p-1 shadow-lg">
+        <div className="flex items-center justify-center px-4 pb-2">
+          <div className="relative w-full h-20">
             <Image 
               src="/SYNAPSE BT COLORS - LIGHT BKG.png" 
               alt="Synapse Logo" 
               fill
-              className="object-contain p-1"
+              className="object-contain"
+              priority
             />
-          </div>
-          <div>
-            <h1 className="font-bold text-xl tracking-tighter text-white">Synapse</h1>
-            <p className="text-[10px] text-zinc-500 uppercase tracking-widest font-black -mt-1">By Buentipo</p>
           </div>
         </div>
 
