@@ -1,24 +1,25 @@
-from sqlalchemy import create_engine, Column, String, Text, DateTime, JSON, ForeignKey
-from sqlalchemy.ext.declarative import declarative_base
-from sqlalchemy.orm import sessionmaker
+from sqlalchemy import create_engine, Column, String, Text, DateTime, JSON
+from sqlalchemy.orm import sessionmaker, declarative_base
 import datetime
 import os
 
-DATABASE_URL = os.getenv("DATABASE_URL")
-if not DATABASE_URL:
-    # Fallback to a local path or placeholder if no DB is connected
-    DATABASE_URL = "postgresql://postgres:postgres@localhost:5432/synapse"
+DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://postgres:postgres@localhost:5432/synapse")
 
-from sqlalchemy import create_engine
+# Railway provee URLs con prefijo 'postgres://' pero SQLAlchemy 2.x requiere 'postgresql://'
+if DATABASE_URL.startswith("postgres://"):
+    DATABASE_URL = DATABASE_URL.replace("postgres://", "postgresql://", 1)
+
 engine = create_engine(DATABASE_URL)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()
+
 
 class User(Base):
     __tablename__ = "users"
     id = Column(String, primary_key=True, index=True)
     email = Column(String, unique=True, index=True)
     tenant_id = Column(String, index=True)
+
 
 class Conversation(Base):
     __tablename__ = "conversations"
@@ -31,6 +32,6 @@ class Conversation(Base):
     raw_data = Column(JSON, nullable=True)
     created_at = Column(DateTime, default=datetime.datetime.utcnow)
 
-# Create tables
+
 def init_db():
     Base.metadata.create_all(bind=engine)
