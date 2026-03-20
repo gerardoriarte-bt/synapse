@@ -62,6 +62,7 @@ async def snowflake_health():
             account=os.getenv("SNOWFLAKE_ACCOUNT"),
             database=os.getenv("SNOWFLAKE_DATABASE", "DB_BT_UA"),
             warehouse=os.getenv("SNOWFLAKE_WAREHOUSE", "COMPUTE_WH"),
+            schema="BT_UA_MART_ANALYTICS",
         )
         results["step_2_connection"] = "✅ Connected successfully"
         

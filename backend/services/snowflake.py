@@ -4,79 +4,133 @@ import uuid
 from models.synapse import SynapseResponse, ChartConfig
 
 
+SCHEMA = "BT_UA_MART_ANALYTICS"
+
+
 class SnowflakeService:
     def __init__(self, tenant_id: str):
         self.conn = snowflake.connector.connect(
             user=os.getenv('SNOWFLAKE_USER'),
             password=os.getenv('SNOWFLAKE_PASSWORD'),
             account=os.getenv('SNOWFLAKE_ACCOUNT'),
-            database=os.getenv(f'DATABASE_{tenant_id.upper()}', os.getenv('SNOWFLAKE_DATABASE', 'DB_BT_UA')),
+            database=os.getenv('SNOWFLAKE_DATABASE', 'DB_BT_UA'),
             warehouse=os.getenv('SNOWFLAKE_WAREHOUSE', 'COMPUTE_WH'),
-            schema=os.getenv(f'SCHEMA_{tenant_id.upper()}', 'PUBLIC')
+            schema=SCHEMA
         )
+
+    def _get_relevant_context(self, cursor, query: str) -> str:
+        """
+        Recupera contexto relevante de las tablas RAG de Snowflake.
+        Busca en REPORTES, ECOM, SOV y FORMULAS según la consulta.
+        """
+        context_parts = []
+
+        # Tabla principal: REPORTES_TEXTO_RAW (reportes de marketing)
+        try:
+            cursor.execute(f"""
+                SELECT CONTENIDO
+                FROM {SCHEMA}.REPORTES_TEXTO_RAW
+                LIMIT 3
+            """)
+            rows = cursor.fetchall()
+            if rows:
+                context_parts.append("=== REPORTES DE MARKETING ===")
+                for row in rows:
+                    context_parts.append(str(row[0])[:800])
+        except Exception as e:
+            print(f"REPORTES_TEXTO_RAW warning: {e}")
+
+        # FORMULAS_MARKETING: definiciones de KPIs
+        try:
+            cursor.execute(f"""
+                SELECT *
+                FROM {SCHEMA}.FORMULAS_MARKETING
+                LIMIT 10
+            """)
+            rows = cursor.fetchall()
+            cols = [desc[0] for desc in cursor.description]
+            if rows:
+                context_parts.append("=== FÓRMULAS Y KPIs DE MARKETING ===")
+                for row in rows:
+                    row_dict = dict(zip(cols, row))
+                    context_parts.append(str(row_dict))
+        except Exception as e:
+            print(f"FORMULAS_MARKETING warning: {e}")
+
+        # SOV: Share of Voice (si la query lo menciona)
+        if any(kw in query.upper() for kw in ["SOV", "SHARE", "VOZ", "PARTICIPACIÓN"]):
+            try:
+                cursor.execute(f"""
+                    SELECT CONTENIDO
+                    FROM {SCHEMA}.SOV_CHUNKS
+                    LIMIT 3
+                """)
+                rows = cursor.fetchall()
+                if rows:
+                    context_parts.append("=== DATOS DE SHARE OF VOICE ===")
+                    for row in rows:
+                        context_parts.append(str(row[0])[:600])
+            except Exception as e:
+                print(f"SOV_CHUNKS warning: {e}")
+
+        # ECOM: ecommerce
+        if any(kw in query.upper() for kw in ["ECOM", "VENTAS", "TIENDA", "STORE", "CONVERSIÓN"]):
+            try:
+                cursor.execute(f"""
+                    SELECT CONTENIDO
+                    FROM {SCHEMA}.ECOM_TEXTO_RAW
+                    LIMIT 3
+                """)
+                rows = cursor.fetchall()
+                if rows:
+                    context_parts.append("=== DATOS DE ECOMMERCE ===")
+                    for row in rows:
+                        context_parts.append(str(row[0])[:600])
+            except Exception as e:
+                print(f"ECOM_TEXTO_RAW warning: {e}")
+
+        return "\n\n".join(context_parts) if context_parts else "No se encontraron datos relevantes en Snowflake."
 
     def process_query(self, query: str, history: list = []) -> SynapseResponse:
         cursor = self.conn.cursor()
         try:
-            raw_data = None
-            chart_config = None
             render_type = "text"
+            chart_config = None
+            raw_data = None
 
-            keywords_chart = ["ROAS", "PAUTA", "GASTO", "ESTRATEGIA", "ANALYSE", "ANALIZA", "ANALI"]
-            if any(kw in query.upper() for kw in keywords_chart):
-                try:
-                    cursor.execute(
-                        "SELECT SEMANA, ROAS, GASTO FROM FACT_MARKETING ORDER BY SEMANA DESC LIMIT 5"
-                    )
-                    rows = cursor.fetchall()
-                    if rows:
-                        raw_data = [
-                            {"semana": str(row[0]), "roas": float(row[1]), "gasto": float(row[2])}
-                            for row in rows
-                        ]
-                        render_type = "chart"
-                        chart_config = ChartConfig(
-                            type="bar",
-                            x_axis=[d["semana"] for d in raw_data],
-                            y_axis=[d["roas"] for d in raw_data],
-                            metrics_label="ROAS"
-                        )
-                except Exception as sql_err:
-                    print(f"SQL fetch warning (non-fatal): {sql_err}")
+            # 1. Recuperar contexto de Snowflake (RAG)
+            snowflake_context = self._get_relevant_context(cursor, query)
 
-            # Build history context
+            # 2. Construir historial de conversación
             history_context = "\n".join(
-                [f"User: {h['q']}\nAssistant: {h['a']}" for h in history]
-            ) if history else "No previous context."
+                [f"Usuario: {h['q']}\nSynapse: {h['a']}" for h in history]
+            ) if history else ""
 
-            data_context = f"DATOS REALES RECUPERADOS: {raw_data}" if raw_data else "No hay datos adicionales disponibles en Snowflake para esta consulta."
+            # 3. Construir prompt para Cortex
+            prompt = f"""Eres Synapse, un Analista de Marketing Senior de la agencia Buentipo.
+Tienes acceso a datos reales de Snowflake. Responde de forma ejecutiva, precisa y orientada a la acción.
 
-            prompt = f"""
-Actúa como un Analista de Marketing Senior especializado en rendimiento de pauta digital para la plataforma Synapse by Buentipo.
-Solo responde con la narrativa ejecutiva. Sé directo, enfocado en datos y orientado a la acción.
+{f"CONVERSACIÓN PREVIA:{chr(10)}{history_context}{chr(10)}" if history_context else ""}
+DATOS DE SNOWFLAKE (contexto real):
+{snowflake_context}
 
-HISTORIAL DE CONVERSACIÓN:
-{history_context}
-
-CONTEXTO DE DATOS ACTUALES (Snowflake):
-{data_context}
-
-PREGUNTA O SOLICITUD DEL USUARIO:
+PREGUNTA DEL USUARIO:
 {query}
 
 INSTRUCCIONES:
-- Si hay historial, mantén total coherencia con lo conversado anteriormente.
-- Si hay datos de Snowflake, menciona cifras concretas y tendencias detectadas.
-- Si el ROAS es bajo (menor a 2.0), sugiere una acción correctiva específica.
-- Si es un reporte estratégico, estructura la respuesta en: Problema detectado, Evidencia de datos y Recomendación ejecutiva.
-- Sé conciso pero preciso. Evita saludos genéricos.
-""".strip().replace("'", "\\'")
+- Usa los datos de Snowflake para fundamentar tu respuesta con cifras concretas cuando estén disponibles.
+- Si detectas tendencias en los reportes, mencionarlas con contexto estratégico.
+- Si la pregunta es de tipo estratégico, estructura tu respuesta en: Situación actual, Hallazgo clave y Recomendación.
+- Sé conciso y directo. No uses saludos ni frases genéricas."""
+
+            # Escapar $$ en el prompt para evitar conflictos SQL
+            prompt_safe = prompt.replace("$$", "__DOBLEDOLAR__")
 
             cursor.execute(
-                f"SELECT SNOWFLAKE.CORTEX.COMPLETE('mistral-large', $${prompt}$$)"
+                f"SELECT SNOWFLAKE.CORTEX.COMPLETE('mistral-large2', $${prompt_safe}$$)"
             )
             row = cursor.fetchone()
-            narrative = row[0] if row else "No se pudo generar una narrativa en este momento."
+            narrative = row[0].replace("__DOBLEDOLAR__", "$$") if row else "No se pudo generar respuesta."
 
             return SynapseResponse(
                 response_id=str(uuid.uuid4()),
