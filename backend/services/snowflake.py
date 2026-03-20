@@ -24,15 +24,26 @@ class SnowflakeService:
     # ------------------------------------------------------------------
 
     def _get_platform_metrics(self, cursor, platform: str) -> list[dict]:
-        """Obtiene métricas de una plataforma específica desde UA_ECOMM."""
+        """Obtiene métricas reales con ROAS calculado (CONVERSION_VALUE / COST)."""
         try:
+            # Google Ads usa DATE, COST, CONVERSION_VALUE, CLICKS, CONVERSIONS
+            # Facebook y Criteo presumiblemente tienen columnas similares
             cursor.execute(f"""
-                SELECT m.*, d.*
-                FROM {ADS_DB}.PUBLIC.{platform}_ADS_METRICAS m
-                LEFT JOIN {ADS_DB}.PUBLIC.{platform}_ADS_DIMENSIONES d
-                    ON m.AD_ID = d.AD_ID
-                ORDER BY m.DATE DESC
-                LIMIT 10
+                SELECT
+                    DATE,
+                    CAMPAIGN_ID,
+                    SUM(COST)                                          AS GASTO,
+                    SUM(CONVERSIONS)                                   AS CONVERSIONES,
+                    SUM(CONVERSION_VALUE)                              AS REVENUE,
+                    SUM(CLICKS)                                        AS CLICKS,
+                    SUM(IMPRESSIONS)                                   AS IMPRESIONES,
+                    ROUND(
+                        SUM(CONVERSION_VALUE) / NULLIF(SUM(COST), 0), 2
+                    )                                                  AS ROAS
+                FROM {ADS_DB}.PUBLIC.{platform}_ADS_METRICAS
+                GROUP BY DATE, CAMPAIGN_ID
+                ORDER BY DATE DESC
+                LIMIT 30
             """)
             rows = cursor.fetchall()
             cols = [desc[0] for desc in cursor.description]
@@ -83,19 +94,25 @@ class SnowflakeService:
                 context_parts.append(str(metrics[:3]))
                 raw_data.extend(metrics[:5])
 
-        # Construir chart_config si hay datos suficientes
+        # Construir chart_config con columnas exactas: DATE y ROAS
         if raw_data and len(raw_data) >= 2:
-            # Intentar extraer ROAS de los datos
-            roas_key = next((k for k in raw_data[0].keys() if "ROAS" in k.upper()), None)
-            date_key = next((k for k in raw_data[0].keys() if "DATE" in k.upper() or "FECHA" in k.upper()), None)
-            platform_key = next((k for k in raw_data[0].keys() if "PLATFORM" in k.upper() or "PLATAFORMA" in k.upper()), None)
+            # Agrupar por fecha (puede haber múltiples campañas por fecha)
+            from collections import defaultdict
+            date_roas: dict = defaultdict(list)
+            for row in raw_data:
+                date_val = str(row.get("DATE", ""))
+                roas_val = row.get("ROAS")
+                if date_val and roas_val is not None:
+                    date_roas[date_val].append(float(roas_val))
 
-            if roas_key and date_key:
+            if date_roas:
+                sorted_dates = sorted(date_roas.keys())[-14:]  # últimas 2 semanas
+                avg_roas = [round(sum(date_roas[d]) / len(date_roas[d]), 2) for d in sorted_dates]
                 chart_config = ChartConfig(
                     type="line",
-                    x_axis=[str(row.get(date_key, i)) for i, row in enumerate(raw_data)],
-                    y_axis=[float(row.get(roas_key, 0) or 0) for row in raw_data],
-                    metrics_label=f"ROAS por fecha"
+                    x_axis=sorted_dates,
+                    y_axis=avg_roas,
+                    metrics_label="ROAS (CONVERSION_VALUE / COST)"
                 )
 
         # Ventas reales
