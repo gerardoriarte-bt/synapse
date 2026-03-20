@@ -10,7 +10,7 @@ class SnowflakeService:
             user=os.getenv('SNOWFLAKE_USER'),
             password=os.getenv('SNOWFLAKE_PASSWORD'),
             account=os.getenv('SNOWFLAKE_ACCOUNT'),
-            database=os.getenv(f'DATABASE_{tenant_id.upper()}', os.getenv('SNOWFLAKE_DATABASE', 'SYNAPSE_DB')),
+            database=os.getenv(f'DATABASE_{tenant_id.upper()}', os.getenv('SNOWFLAKE_DATABASE', 'DB_BT_UA')),
             warehouse=os.getenv('SNOWFLAKE_WAREHOUSE', 'COMPUTE_WH'),
             schema=os.getenv(f'SCHEMA_{tenant_id.upper()}', 'PUBLIC')
         )

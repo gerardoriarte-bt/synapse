@@ -60,7 +60,7 @@ async def snowflake_health():
             user=os.getenv("SNOWFLAKE_USER"),
             password=os.getenv("SNOWFLAKE_PASSWORD"),
             account=os.getenv("SNOWFLAKE_ACCOUNT"),
-            database=os.getenv("SNOWFLAKE_DATABASE", "SYNAPSE_DB"),
+            database=os.getenv("SNOWFLAKE_DATABASE", "DB_BT_UA"),
             warehouse=os.getenv("SNOWFLAKE_WAREHOUSE", "COMPUTE_WH"),
         )
         results["step_2_connection"] = "✅ Connected successfully"
@@ -75,13 +75,14 @@ async def snowflake_health():
         except Exception as e:
             results["step_3_cortex"] = f"❌ Cortex error: {str(e)}"
         
-        # Step 4: Verificar tabla FACT_MARKETING
+        # Step 4: Listar tablas disponibles en la DB
         try:
-            cursor.execute("SELECT COUNT(*) FROM FACT_MARKETING")
-            count = cursor.fetchone()[0]
-            results["step_4_table"] = f"✅ FACT_MARKETING exists with {count} rows"
+            cursor.execute("SHOW TABLES")
+            tables = cursor.fetchall()
+            table_names = [t[1] for t in tables] if tables else []
+            results["step_4_table"] = f"✅ Tables found: {table_names}"
         except Exception as e:
-            results["step_4_table"] = f"❌ Table error: {str(e)}"
+            results["step_4_table"] = f"❌ Table list error: {str(e)}"
         
         cursor.close()
         conn.close()
