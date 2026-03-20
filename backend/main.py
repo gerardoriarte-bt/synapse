@@ -36,6 +36,61 @@ class QueryRequest(BaseModel):
 async def health_check():
     return {"status": "Synapse Online", "database": "Postgres Connected"}
 
+
+@app.get("/api/health/snowflake")
+async def snowflake_health():
+    """Endpoint de diagnóstico para validar la conexión con Snowflake paso a paso."""
+    import snowflake.connector
+    results = {
+        "step_1_env_vars": {},
+        "step_2_connection": None,
+        "step_3_cortex": None,
+        "step_4_table": None,
+    }
+    
+    # Step 1: Verificar variables de entorno
+    required_vars = ["SNOWFLAKE_USER", "SNOWFLAKE_PASSWORD", "SNOWFLAKE_ACCOUNT", "SNOWFLAKE_DATABASE", "SNOWFLAKE_WAREHOUSE"]
+    for var in required_vars:
+        val = os.getenv(var)
+        results["step_1_env_vars"][var] = "✅ Set" if val else "❌ MISSING"
+    
+    # Step 2: Intentar conexión
+    try:
+        conn = snowflake.connector.connect(
+            user=os.getenv("SNOWFLAKE_USER"),
+            password=os.getenv("SNOWFLAKE_PASSWORD"),
+            account=os.getenv("SNOWFLAKE_ACCOUNT"),
+            database=os.getenv("SNOWFLAKE_DATABASE", "SYNAPSE_DB"),
+            warehouse=os.getenv("SNOWFLAKE_WAREHOUSE", "COMPUTE_WH"),
+        )
+        results["step_2_connection"] = "✅ Connected successfully"
+        
+        cursor = conn.cursor()
+        
+        # Step 3: Probar Cortex AI
+        try:
+            cursor.execute("SELECT SNOWFLAKE.CORTEX.COMPLETE('mistral-large', $$Responde solo: OK$$)")
+            row = cursor.fetchone()
+            results["step_3_cortex"] = f"✅ Cortex responding: {str(row[0])[:80]}"
+        except Exception as e:
+            results["step_3_cortex"] = f"❌ Cortex error: {str(e)}"
+        
+        # Step 4: Verificar tabla FACT_MARKETING
+        try:
+            cursor.execute("SELECT COUNT(*) FROM FACT_MARKETING")
+            count = cursor.fetchone()[0]
+            results["step_4_table"] = f"✅ FACT_MARKETING exists with {count} rows"
+        except Exception as e:
+            results["step_4_table"] = f"❌ Table error: {str(e)}"
+        
+        cursor.close()
+        conn.close()
+        
+    except Exception as e:
+        results["step_2_connection"] = f"❌ Connection failed: {str(e)}"
+    
+    return results
+
 @app.post("/api/synapse/ask")
 async def ask_synapse(request: QueryRequest, db: Session = Depends(get_db)):
     try:
