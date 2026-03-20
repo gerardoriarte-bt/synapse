@@ -3,8 +3,9 @@ import os
 import uuid
 from models.synapse import SynapseResponse, ChartConfig
 
-
-SCHEMA = "BT_UA_MART_ANALYTICS"
+RAG_DB     = "DB_BT_UA"
+RAG_SCHEMA = "BT_UA_MART_ANALYTICS"
+ADS_DB     = "UA_ECOMM"
 
 
 class SnowflakeService:
@@ -13,131 +14,196 @@ class SnowflakeService:
             user=os.getenv('SNOWFLAKE_USER'),
             password=os.getenv('SNOWFLAKE_PASSWORD'),
             account=os.getenv('SNOWFLAKE_ACCOUNT'),
-            database=os.getenv('SNOWFLAKE_DATABASE', 'DB_BT_UA'),
+            database=os.getenv('SNOWFLAKE_DATABASE', RAG_DB),
             warehouse=os.getenv('SNOWFLAKE_WAREHOUSE', 'COMPUTE_WH'),
-            schema=SCHEMA
+            schema=RAG_SCHEMA
         )
 
-    def _get_relevant_context(self, cursor, query: str) -> str:
-        """
-        Recupera contexto relevante de las tablas RAG de Snowflake.
-        Busca en REPORTES, ECOM, SOV y FORMULAS según la consulta.
-        """
-        context_parts = []
+    # ------------------------------------------------------------------
+    # DATOS DE PAUTA REAL (UA_ECOMM)
+    # ------------------------------------------------------------------
 
-        # Tabla principal: REPORTES_TEXTO_RAW (reportes de marketing)
+    def _get_platform_metrics(self, cursor, platform: str) -> list[dict]:
+        """Obtiene métricas de una plataforma específica desde UA_ECOMM."""
         try:
             cursor.execute(f"""
-                SELECT CONTENIDO
-                FROM {SCHEMA}.REPORTES_TEXTO_RAW
-                LIMIT 3
-            """)
-            rows = cursor.fetchall()
-            if rows:
-                context_parts.append("=== REPORTES DE MARKETING ===")
-                for row in rows:
-                    context_parts.append(str(row[0])[:800])
-        except Exception as e:
-            print(f"REPORTES_TEXTO_RAW warning: {e}")
-
-        # FORMULAS_MARKETING: definiciones de KPIs
-        try:
-            cursor.execute(f"""
-                SELECT *
-                FROM {SCHEMA}.FORMULAS_MARKETING
+                SELECT m.*, d.*
+                FROM {ADS_DB}.PUBLIC.{platform}_ADS_METRICAS m
+                LEFT JOIN {ADS_DB}.PUBLIC.{platform}_ADS_DIMENSIONES d
+                    ON m.AD_ID = d.AD_ID
+                ORDER BY m.DATE DESC
                 LIMIT 10
             """)
             rows = cursor.fetchall()
             cols = [desc[0] for desc in cursor.description]
-            if rows:
-                context_parts.append("=== FÓRMULAS Y KPIs DE MARKETING ===")
-                for row in rows:
-                    row_dict = dict(zip(cols, row))
-                    context_parts.append(str(row_dict))
+            return [dict(zip(cols, row)) for row in rows] if rows else []
         except Exception as e:
-            print(f"FORMULAS_MARKETING warning: {e}")
+            print(f"{platform} metrics warning: {e}")
+            return []
 
-        # SOV: Share of Voice (si la query lo menciona)
-        if any(kw in query.upper() for kw in ["SOV", "SHARE", "VOZ", "PARTICIPACIÓN"]):
+    def _get_sales_data(self, cursor) -> list[dict]:
+        """Obtiene datos de ventas reales desde UA_ECOMM."""
+        try:
+            cursor.execute(f"""
+                SELECT *
+                FROM {ADS_DB}.PUBLIC.VENTAS_POR_PLATAFORMA_Y_ID_CLIENTE
+                ORDER BY 1 DESC
+                LIMIT 10
+            """)
+            rows = cursor.fetchall()
+            cols = [desc[0] for desc in cursor.description]
+            return [dict(zip(cols, row)) for row in rows] if rows else []
+        except Exception as e:
+            print(f"VENTAS warning: {e}")
+            return []
+
+    def _build_ads_context(self, cursor, query: str) -> tuple[str, list, ChartConfig | None]:
+        """Construye contexto de datos de pauta con detección de plataforma."""
+        context_parts = []
+        raw_data = []
+        chart_config = None
+
+        # Detectar plataformas relevantes en la consulta
+        platforms = []
+        if any(k in query.upper() for k in ["GOOGLE", "SEM", "SEARCH"]):
+            platforms.append("GOOGLE")
+        if any(k in query.upper() for k in ["FACEBOOK", "META", "FB", "INSTAGRAM"]):
+            platforms.append("FACEBOOK")
+        if any(k in query.upper() for k in ["CRITEO", "RETARGETING", "DISPLAY"]):
+            platforms.append("CRITEO")
+
+        # Si no se detecta plataforma o pregunta por ROAS general, traer todas
+        if not platforms or any(k in query.upper() for k in ["ROAS", "GENERAL", "TODAS", "RESUMEN", "ESTRATEG"]):
+            platforms = ["GOOGLE", "FACEBOOK", "CRITEO"]
+
+        for platform in platforms:
+            metrics = self._get_platform_metrics(cursor, platform)
+            if metrics:
+                context_parts.append(f"=== {platform} ADS (últimas filas) ===")
+                context_parts.append(str(metrics[:3]))
+                raw_data.extend(metrics[:5])
+
+        # Construir chart_config si hay datos suficientes
+        if raw_data and len(raw_data) >= 2:
+            # Intentar extraer ROAS de los datos
+            roas_key = next((k for k in raw_data[0].keys() if "ROAS" in k.upper()), None)
+            date_key = next((k for k in raw_data[0].keys() if "DATE" in k.upper() or "FECHA" in k.upper()), None)
+            platform_key = next((k for k in raw_data[0].keys() if "PLATFORM" in k.upper() or "PLATAFORMA" in k.upper()), None)
+
+            if roas_key and date_key:
+                chart_config = ChartConfig(
+                    type="line",
+                    x_axis=[str(row.get(date_key, i)) for i, row in enumerate(raw_data)],
+                    y_axis=[float(row.get(roas_key, 0) or 0) for row in raw_data],
+                    metrics_label=f"ROAS por fecha"
+                )
+
+        # Ventas reales
+        if any(k in query.upper() for k in ["VENTA", "REVENUE", "INGRESO", "ECOMMERCE", "ROAS", "ESTRATEG"]):
+            sales = self._get_sales_data(cursor)
+            if sales:
+                context_parts.append("=== VENTAS POR PLATAFORMA ===")
+                context_parts.append(str(sales[:3]))
+                if not raw_data:
+                    raw_data = sales
+
+        return "\n\n".join(context_parts), raw_data, chart_config
+
+    # ------------------------------------------------------------------
+    # CONTEXTO RAG (DB_BT_UA)
+    # ------------------------------------------------------------------
+
+    def _get_rag_context(self, cursor, query: str) -> str:
+        """Recupera contexto de los reportes y fórmulas de marketing (RAG)."""
+        parts = []
+
+        # FORMULAS_MARKETING siempre
+        try:
+            cursor.execute(f"SELECT * FROM {RAG_DB}.{RAG_SCHEMA}.FORMULAS_MARKETING LIMIT 8")
+            rows = cursor.fetchall()
+            cols = [desc[0] for desc in cursor.description]
+            if rows:
+                parts.append("=== FÓRMULAS Y KPIs DEFINIDOS ===")
+                parts.append(str([dict(zip(cols, r)) for r in rows]))
+        except Exception as e:
+            print(f"FORMULAS warning: {e}")
+
+        # REPORTES_TEXTO_RAW si es consulta estratégica o de reportes
+        if any(k in query.upper() for k in ["REPORTE", "ESTRATEG", "ANALIZ", "ROAS", "RENDIMIENTO", "INSIGHT"]):
             try:
-                cursor.execute(f"""
-                    SELECT CONTENIDO
-                    FROM {SCHEMA}.SOV_CHUNKS
-                    LIMIT 3
-                """)
+                cursor.execute(f"SELECT * FROM {RAG_DB}.{RAG_SCHEMA}.REPORTES_TEXTO_RAW LIMIT 3")
                 rows = cursor.fetchall()
+                cols = [desc[0] for desc in cursor.description]
                 if rows:
-                    context_parts.append("=== DATOS DE SHARE OF VOICE ===")
-                    for row in rows:
-                        context_parts.append(str(row[0])[:600])
+                    parts.append("=== REPORTES DE MARKETING ===")
+                    for r in rows:
+                        parts.append(str(dict(zip(cols, r)))[:600])
             except Exception as e:
-                print(f"SOV_CHUNKS warning: {e}")
+                print(f"REPORTES warning: {e}")
 
-        # ECOM: ecommerce
-        if any(kw in query.upper() for kw in ["ECOM", "VENTAS", "TIENDA", "STORE", "CONVERSIÓN"]):
+        # SOV
+        if any(k in query.upper() for k in ["SOV", "SHARE", "PARTICIPACIÓN", "MERCADO"]):
             try:
-                cursor.execute(f"""
-                    SELECT CONTENIDO
-                    FROM {SCHEMA}.ECOM_TEXTO_RAW
-                    LIMIT 3
-                """)
+                cursor.execute(f"SELECT * FROM {RAG_DB}.{RAG_SCHEMA}.SOV_CHUNKS LIMIT 3")
                 rows = cursor.fetchall()
+                cols = [desc[0] for desc in cursor.description]
                 if rows:
-                    context_parts.append("=== DATOS DE ECOMMERCE ===")
-                    for row in rows:
-                        context_parts.append(str(row[0])[:600])
+                    parts.append("=== SHARE OF VOICE ===")
+                    for r in rows:
+                        parts.append(str(dict(zip(cols, r)))[:500])
             except Exception as e:
-                print(f"ECOM_TEXTO_RAW warning: {e}")
+                print(f"SOV warning: {e}")
 
-        return "\n\n".join(context_parts) if context_parts else "No se encontraron datos relevantes en Snowflake."
+        return "\n\n".join(parts) if parts else ""
+
+    # ------------------------------------------------------------------
+    # PROCESO PRINCIPAL
+    # ------------------------------------------------------------------
 
     def process_query(self, query: str, history: list = []) -> SynapseResponse:
         cursor = self.conn.cursor()
         try:
-            render_type = "text"
-            chart_config = None
-            raw_data = None
+            # 1. Datos reales de pauta (UA_ECOMM)
+            ads_context, raw_data, chart_config = self._build_ads_context(cursor, query)
+            render_type = "chart" if chart_config else ("table" if raw_data else "text")
 
-            # 1. Recuperar contexto de Snowflake (RAG)
-            snowflake_context = self._get_relevant_context(cursor, query)
+            # 2. Contexto RAG de reportes y fórmulas
+            rag_context = self._get_rag_context(cursor, query)
 
-            # 2. Construir historial de conversación
+            # 3. Historial conversacional
             history_context = "\n".join(
                 [f"Usuario: {h['q']}\nSynapse: {h['a']}" for h in history]
             ) if history else ""
 
-            # 3. Construir prompt para Cortex
-            prompt = f"""Eres Synapse, un Analista de Marketing Senior de la agencia Buentipo.
-Tienes acceso a datos reales de Snowflake. Responde de forma ejecutiva, precisa y orientada a la acción.
+            # 4. Prompt para Cortex
+            prompt = f"""Eres Synapse, Analista de Marketing Senior de la agencia Buentipo.
+Tienes acceso a datos reales de Snowflake de campañas digitales en Google, Facebook y Criteo.
+Responde de forma ejecutiva, directa y orientada a la acción estratégica.
 
-{f"CONVERSACIÓN PREVIA:{chr(10)}{history_context}{chr(10)}" if history_context else ""}
-DATOS DE SNOWFLAKE (contexto real):
-{snowflake_context}
-
-PREGUNTA DEL USUARIO:
-{query}
+{f"HISTORIAL:{chr(10)}{history_context}{chr(10)}" if history_context else ""}
+{f"DATOS DE PAUTA REAL (Snowflake UA_ECOMM):{chr(10)}{ads_context}{chr(10)}" if ads_context else ""}
+{f"CONTEXTO Y FÓRMULAS (Snowflake DB_BT_UA):{chr(10)}{rag_context}{chr(10)}" if rag_context else ""}
+PREGUNTA: {query}
 
 INSTRUCCIONES:
-- Usa los datos de Snowflake para fundamentar tu respuesta con cifras concretas cuando estén disponibles.
-- Si detectas tendencias en los reportes, mencionarlas con contexto estratégico.
-- Si la pregunta es de tipo estratégico, estructura tu respuesta en: Situación actual, Hallazgo clave y Recomendación.
-- Sé conciso y directo. No uses saludos ni frases genéricas."""
+- Usa cifras concretas de los datos cuando estén disponibles.
+- Si hay datos de ROAS, compara plataformas y destaca la más eficiente.
+- Si es consulta estratégica: Situación actual → Hallazgo clave → Recomendación ejecutiva.
+- Respuesta concisa, sin saludos."""
 
-            # Escapar $$ en el prompt para evitar conflictos SQL
-            prompt_safe = prompt.replace("$$", "__DOBLEDOLAR__")
-
+            prompt_safe = prompt.replace("$$", "__DD__")
             cursor.execute(
                 f"SELECT SNOWFLAKE.CORTEX.COMPLETE('mistral-large2', $${prompt_safe}$$)"
             )
             row = cursor.fetchone()
-            narrative = row[0].replace("__DOBLEDOLAR__", "$$") if row else "No se pudo generar respuesta."
+            narrative = row[0].replace("__DD__", "$$") if row else "No se pudo generar respuesta."
 
             return SynapseResponse(
                 response_id=str(uuid.uuid4()),
                 narrative=narrative,
                 render_type=render_type,
                 chart_config=chart_config,
-                raw_data=raw_data
+                raw_data=raw_data if raw_data else None
             )
         finally:
             cursor.close()
