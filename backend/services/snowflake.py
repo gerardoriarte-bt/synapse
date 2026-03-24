@@ -1,6 +1,7 @@
 import snowflake.connector
 import os
 import uuid
+from typing import Optional, Union, List, Tuple, Dict
 from models.synapse import SynapseResponse, ChartConfig
 
 RAG_DB     = "DB_BT_UA"
@@ -10,20 +11,30 @@ ADS_DB     = "UA_ECOMM"
 
 class SnowflakeService:
     def __init__(self, tenant_id: str):
-        self.conn = snowflake.connector.connect(
-            user=os.getenv('SNOWFLAKE_USER'),
-            password=os.getenv('SNOWFLAKE_PASSWORD'),
-            account=os.getenv('SNOWFLAKE_ACCOUNT'),
-            database=os.getenv('SNOWFLAKE_DATABASE', RAG_DB),
-            warehouse=os.getenv('SNOWFLAKE_WAREHOUSE', 'COMPUTE_WH'),
-            schema=RAG_SCHEMA
-        )
+        token = os.getenv('SNOWFLAKE_TOKEN')
+        conn_params = {
+            "user": os.getenv('SNOWFLAKE_USER'),
+            "account": os.getenv('SNOWFLAKE_ACCOUNT'),
+            "database": os.getenv('SNOWFLAKE_DATABASE', RAG_DB),
+            "warehouse": os.getenv('SNOWFLAKE_WAREHOUSE', 'COMPUTE_WH'),
+            "schema": RAG_SCHEMA
+        }
+
+        if token:
+            # Autenticación moderna vía Token Programático (evita MFA manual)
+            conn_params["authenticator"] = "PROGRAMMATIC_ACCESS_TOKEN"
+            conn_params["token"] = token
+        else:
+            # Fallback a contraseña tradicional
+            conn_params["password"] = os.getenv('SNOWFLAKE_PASSWORD')
+
+        self.conn = snowflake.connector.connect(**conn_params)
 
     # ------------------------------------------------------------------
     # DATOS DE PAUTA REAL (UA_ECOMM)
     # ------------------------------------------------------------------
 
-    def _get_platform_metrics(self, cursor, platform: str) -> list[dict]:
+    def _get_platform_metrics(self, cursor, platform: str) -> List[Dict]:
         """Obtiene métricas reales con ROAS calculado (CONVERSION_VALUE / COST)."""
         try:
             # Google Ads usa DATE, COST, CONVERSION_VALUE, CLICKS, CONVERSIONS
@@ -52,7 +63,7 @@ class SnowflakeService:
             print(f"{platform} metrics warning: {e}")
             return []
 
-    def _get_sales_data(self, cursor) -> list[dict]:
+    def _get_sales_data(self, cursor) -> List[Dict]:
         """Obtiene datos de ventas reales desde UA_ECOMM."""
         try:
             cursor.execute(f"""
@@ -68,7 +79,7 @@ class SnowflakeService:
             print(f"VENTAS warning: {e}")
             return []
 
-    def _build_ads_context(self, cursor, query: str) -> tuple[str, list, ChartConfig | None]:
+    def _build_ads_context(self, cursor, query: str) -> Tuple[str, List, Optional[ChartConfig]]:
         """Construye contexto de datos de pauta con detección de plataforma."""
         context_parts = []
         raw_data = []
@@ -177,7 +188,7 @@ class SnowflakeService:
     # PROCESO PRINCIPAL
     # ------------------------------------------------------------------
 
-    def process_query(self, query: str, history: list = []) -> SynapseResponse:
+    def process_query(self, query: str, history: List = []) -> SynapseResponse:
         cursor = self.conn.cursor()
         try:
             # 1. Datos reales de pauta (UA_ECOMM)

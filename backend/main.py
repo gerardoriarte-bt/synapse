@@ -49,7 +49,7 @@ async def snowflake_health():
     }
     
     # Step 1: Verificar variables de entorno
-    required_vars = ["SNOWFLAKE_USER", "SNOWFLAKE_PASSWORD", "SNOWFLAKE_ACCOUNT", "SNOWFLAKE_DATABASE", "SNOWFLAKE_WAREHOUSE"]
+    required_vars = ["SNOWFLAKE_USER", "SNOWFLAKE_PASSWORD", "SNOWFLAKE_ACCOUNT", "SNOWFLAKE_DATABASE", "SNOWFLAKE_WAREHOUSE", "SNOWFLAKE_TOKEN"]
     for var in required_vars:
         val = os.getenv(var)
         results["step_1_env_vars"][var] = "✅ Set" if val else "❌ MISSING"
