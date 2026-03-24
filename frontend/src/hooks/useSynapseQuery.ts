@@ -9,7 +9,12 @@ export function useSynapseQuery() {
   const [response, setResponse] = useState<SynapseResponse | null>(null);
 
   // URL del API Gateway (Localhost o Railway)
-  const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+  let API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+  
+  // Robustez: si se configuró la variable de entorno en Railway sin "https://", se lo agregamos automáticamente
+  if (API_URL && !API_URL.startsWith('http')) {
+    API_URL = `https://${API_URL}`;
+  }
 
   const askSynapse = async (query: string) => {
     setIsLoading(true);
