@@ -11,21 +11,24 @@ ADS_DB     = "UA_ECOMM"
 
 class SnowflakeService:
     def __init__(self, tenant_id: str):
-        token = os.getenv('SNOWFLAKE_TOKEN')
+        token = os.getenv('SNOWFLAKE_TOKEN', '').strip()
+        user = os.getenv('SNOWFLAKE_USER', '').strip()
+        account = os.getenv('SNOWFLAKE_ACCOUNT', '').strip()
+        
         conn_params = {
-            "user": os.getenv('SNOWFLAKE_USER'),
-            "account": os.getenv('SNOWFLAKE_ACCOUNT'),
+            "user": user,
+            "account": account,
             "database": os.getenv('SNOWFLAKE_DATABASE', RAG_DB),
-            "warehouse": os.getenv('SNOWFLAKE_WAREHOUSE', 'COMPUTE_WH'),
+            "warehouse": os.getenv('SNOWFLAKE_WAREHOUSE', 'COMPUTE_WH').strip(),
             "schema": RAG_SCHEMA
         }
 
         if token:
-            # Autenticación moderna vía Token Programático (evita MFA manual)
+            print(f"[Snowflake] Connecting via Programmatic Access Token (len: {len(token)})")
             conn_params["authenticator"] = "PROGRAMMATIC_ACCESS_TOKEN"
             conn_params["token"] = token
         else:
-            # Fallback a contraseña tradicional
+            print("[Snowflake] Connecting via Password (no token found)")
             conn_params["password"] = os.getenv('SNOWFLAKE_PASSWORD')
 
         self.conn = snowflake.connector.connect(**conn_params)
