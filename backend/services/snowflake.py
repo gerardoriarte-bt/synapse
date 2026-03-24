@@ -12,23 +12,23 @@ ADS_DB     = "UA_ECOMM"
 class SnowflakeService:
     def __init__(self, tenant_id: str):
         token = os.getenv('SNOWFLAKE_TOKEN', '').strip()
-        user = os.getenv('SNOWFLAKE_USER', '').strip()
-        account = os.getenv('SNOWFLAKE_ACCOUNT', '').strip()
+        user = os.getenv('SNOWFLAKE_USER', '').strip().upper()
+        account = os.getenv('SNOWFLAKE_ACCOUNT', '').strip().upper()
         
         conn_params = {
             "user": user,
             "account": account,
             "database": os.getenv('SNOWFLAKE_DATABASE', RAG_DB),
-            "warehouse": os.getenv('SNOWFLAKE_WAREHOUSE', 'COMPUTE_WH').strip(),
+            "warehouse": os.getenv('SNOWFLAKE_WAREHOUSE', 'COMPUTE_WH').strip().upper(),
             "schema": RAG_SCHEMA
         }
 
         if token:
-            print(f"[Snowflake] Connecting via Programmatic Access Token (len: {len(token)})")
+            print(f"[Snowflake] Connecting via Token (User: {user}, Account: {account})")
             conn_params["authenticator"] = "PROGRAMMATIC_ACCESS_TOKEN"
             conn_params["token"] = token
         else:
-            print("[Snowflake] Connecting via Password (no token found)")
+            print("[Snowflake] Connecting via Password")
             conn_params["password"] = os.getenv('SNOWFLAKE_PASSWORD')
 
         self.conn = snowflake.connector.connect(**conn_params)
