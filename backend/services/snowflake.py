@@ -20,7 +20,10 @@ class SnowflakeService:
             "account": account,
             "database": os.getenv('SNOWFLAKE_DATABASE', RAG_DB),
             "warehouse": os.getenv('SNOWFLAKE_WAREHOUSE', 'COMPUTE_WH').strip().upper(),
-            "schema": RAG_SCHEMA
+            "schema": RAG_SCHEMA,
+            "role": "SYSADMIN", # Forzamos el rol que vimos en la captura
+            "client_prefetch_mfa_token": False,
+            "client_request_mfa_token": False
         }
 
         if token:
