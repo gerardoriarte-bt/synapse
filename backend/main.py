@@ -52,7 +52,12 @@ async def snowflake_health():
     required_vars = ["SNOWFLAKE_USER", "SNOWFLAKE_PASSWORD", "SNOWFLAKE_ACCOUNT", "SNOWFLAKE_DATABASE", "SNOWFLAKE_WAREHOUSE", "SNOWFLAKE_TOKEN"]
     for var in required_vars:
         val = os.getenv(var)
-        results["step_1_env_vars"][var] = f"✅ Set (length: {len(val)})" if val else "❌ MISSING"
+        if val:
+            # Mostramos diagnóstico del valor (longitud y pista de caracteres)
+            pista = f"{val[0]}...{val[-1]}" if len(val) > 2 else val
+            results["step_1_env_vars"][var] = f"✅ Set (len: {len(val)}, hint: {pista})"
+        else:
+            results["step_1_env_vars"][var] = "❌ MISSING"
     
     # Step 2: Intentar conexión
     try:
