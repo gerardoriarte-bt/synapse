@@ -11,36 +11,28 @@ ADS_DB     = "UA_ECOMM"
 
 class SnowflakeService:
     def __init__(self, tenant_id: str):
-        auth_method = os.getenv("SNOWFLAKE_AUTH_METHOD", "token").strip().lower()
         token = os.getenv('SNOWFLAKE_TOKEN', '').strip()
         user = os.getenv('SNOWFLAKE_USER', '').strip().upper()
         account = os.getenv('SNOWFLAKE_ACCOUNT', '').strip().upper()
-        role = os.getenv("SNOWFLAKE_ROLE", "SYSADMIN").strip().upper()
-        schema = os.getenv("SNOWFLAKE_SCHEMA", RAG_SCHEMA).strip().upper()
         
         conn_params = {
             "user": user,
             "account": account,
             "database": os.getenv('SNOWFLAKE_DATABASE', RAG_DB),
             "warehouse": os.getenv('SNOWFLAKE_WAREHOUSE', 'COMPUTE_WH').strip().upper(),
-            "schema": schema,
-            "role": role,
+            "schema": RAG_SCHEMA,
+            "role": "SYSADMIN", # Forzamos el rol que vimos en la captura
             "client_prefetch_mfa_token": False,
             "client_request_mfa_token": False
         }
 
-        if auth_method == "token":
-            if not token:
-                raise ValueError("SNOWFLAKE_AUTH_METHOD=token pero SNOWFLAKE_TOKEN no está configurado")
+        if token:
             print(f"[Snowflake] Connecting via Token (User: {user}, Account: {account})")
             conn_params["authenticator"] = "PROGRAMMATIC_ACCESS_TOKEN"
             conn_params["token"] = token
         else:
             print("[Snowflake] Connecting via Password")
-            password = os.getenv('SNOWFLAKE_PASSWORD')
-            if not password:
-                raise ValueError("SNOWFLAKE_AUTH_METHOD=password pero SNOWFLAKE_PASSWORD no está configurado")
-            conn_params["password"] = password
+            conn_params["password"] = os.getenv('SNOWFLAKE_PASSWORD')
 
         self.conn = snowflake.connector.connect(**conn_params)
 

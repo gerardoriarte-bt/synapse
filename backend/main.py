@@ -41,29 +41,15 @@ async def health_check():
 async def snowflake_health():
     """Endpoint de diagnóstico para validar la conexión con Snowflake paso a paso."""
     import snowflake.connector
-    auth_method = os.getenv("SNOWFLAKE_AUTH_METHOD", "token").strip().lower()
-    role = os.getenv("SNOWFLAKE_ROLE", "SYSADMIN").strip().upper()
-    schema = os.getenv("SNOWFLAKE_SCHEMA", "BT_UA_MART_ANALYTICS").strip().upper()
     results = {
         "step_1_env_vars": {},
-        "auth_method": auth_method,
         "step_2_connection": None,
         "step_3_cortex": None,
         "step_4_table": None,
     }
     
     # Step 1: Verificar variables de entorno
-    required_vars = [
-        "SNOWFLAKE_USER",
-        "SNOWFLAKE_ACCOUNT",
-        "SNOWFLAKE_DATABASE",
-        "SNOWFLAKE_WAREHOUSE",
-        "SNOWFLAKE_AUTH_METHOD",
-        "SNOWFLAKE_ROLE",
-        "SNOWFLAKE_SCHEMA",
-        "SNOWFLAKE_PASSWORD",
-        "SNOWFLAKE_TOKEN"
-    ]
+    required_vars = ["SNOWFLAKE_USER", "SNOWFLAKE_PASSWORD", "SNOWFLAKE_ACCOUNT", "SNOWFLAKE_DATABASE", "SNOWFLAKE_WAREHOUSE", "SNOWFLAKE_TOKEN"]
     for var in required_vars:
         val = os.getenv(var)
         if val:
@@ -75,32 +61,14 @@ async def snowflake_health():
     
     # Step 2: Intentar conexión
     try:
-        conn_params = {
-            "user": os.getenv("SNOWFLAKE_USER"),
-            "account": os.getenv("SNOWFLAKE_ACCOUNT"),
-            "database": os.getenv("SNOWFLAKE_DATABASE", "DB_BT_UA"),
-            "warehouse": os.getenv("SNOWFLAKE_WAREHOUSE", "COMPUTE_WH"),
-            "schema": schema,
-            "role": role,
-            "client_prefetch_mfa_token": False,
-            "client_request_mfa_token": False,
-        }
-
-        if auth_method == "token":
-            token = os.getenv("SNOWFLAKE_TOKEN")
-            if not token:
-                raise ValueError("SNOWFLAKE_AUTH_METHOD=token pero SNOWFLAKE_TOKEN no está configurado")
-            conn_params["authenticator"] = "PROGRAMMATIC_ACCESS_TOKEN"
-            conn_params["token"] = token
-        elif auth_method == "password":
-            password = os.getenv("SNOWFLAKE_PASSWORD")
-            if not password:
-                raise ValueError("SNOWFLAKE_AUTH_METHOD=password pero SNOWFLAKE_PASSWORD no está configurado")
-            conn_params["password"] = password
-        else:
-            raise ValueError("SNOWFLAKE_AUTH_METHOD inválido. Usa 'token' o 'password'")
-
-        conn = snowflake.connector.connect(**conn_params)
+        conn = snowflake.connector.connect(
+            user=os.getenv("SNOWFLAKE_USER"),
+            password=os.getenv("SNOWFLAKE_PASSWORD"),
+            account=os.getenv("SNOWFLAKE_ACCOUNT"),
+            database=os.getenv("SNOWFLAKE_DATABASE", "DB_BT_UA"),
+            warehouse=os.getenv("SNOWFLAKE_WAREHOUSE", "COMPUTE_WH"),
+            schema="BT_UA_MART_ANALYTICS",
+        )
         results["step_2_connection"] = "✅ Connected successfully"
         
         cursor = conn.cursor()
