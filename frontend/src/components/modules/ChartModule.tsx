@@ -20,10 +20,9 @@ interface Props {
 }
 
 export const ChartModule: React.FC<Props> = ({ config, data }) => {
-  // Map internal data if needed
-  const chartData = data || config.x_axis.map((x, i) => ({
+  const chartData = config.x_axis.map((x, i) => ({
     name: x,
-    [config.metrics_label]: config.y_axis[i]
+    value: config.y_axis[i] ?? 0,
   }));
 
   const label = config.metrics_label;
@@ -35,7 +34,7 @@ export const ChartModule: React.FC<Props> = ({ config, data }) => {
           <BarChart data={chartData}>
             <CartesianGrid strokeDasharray="3 3" stroke="#27272a" vertical={false} />
             <XAxis 
-              dataKey="semana" 
+              dataKey="name"
               stroke="#71717a" 
               fontSize={12} 
               tickLine={false} 
@@ -47,7 +46,7 @@ export const ChartModule: React.FC<Props> = ({ config, data }) => {
               itemStyle={{ color: '#818cf8' }}
             />
             <Bar 
-              dataKey="roas" 
+              dataKey="value"
               fill="#6366f1" 
               radius={[4, 4, 0, 0]} 
               name={label}
@@ -63,10 +62,11 @@ export const ChartModule: React.FC<Props> = ({ config, data }) => {
             />
             <Line 
               type="monotone" 
-              dataKey={label} 
+              dataKey="value"
               stroke="#6366f1" 
               strokeWidth={3} 
               dot={{ fill: '#6366f1', r: 4 }} 
+              name={label}
             />
           </LineChart>
         )}

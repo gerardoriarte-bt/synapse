@@ -43,6 +43,61 @@ class SnowflakeService:
 
         self.conn = snowflake.connector.connect(**conn_params)
 
+    def _wants_chart(self, query: str) -> bool:
+        chart_terms = [
+            "GRAF", "CHART", "TENDENCIA", "EVOLUC", "HISTOR", "COMPAR",
+            "ROAS", "CTR", "CPC", "CPM", "GASTO", "REVENUE", "CONVERSION",
+            "DESEMPE", "RENDIMIENTO",
+        ]
+        q = query.upper()
+        return any(term in q for term in chart_terms)
+
+    def _build_fallback_chart(self, raw_data: List[Dict]) -> Optional[ChartConfig]:
+        if not raw_data:
+            return None
+
+        preferred_x_keys = ["DATE", "FECHA", "CAMPAIGN_ID", "CAMPAIGN", "PLATAFORMA", "PLATFORM"]
+        preferred_y_keys = ["ROAS", "REVENUE", "GASTO", "CONVERSIONES", "CLICKS", "IMPRESIONES"]
+
+        sample = raw_data[0]
+        keys = list(sample.keys())
+
+        x_key = next((k for k in preferred_x_keys if k in keys), None)
+        if not x_key:
+            x_key = next((k for k in keys if isinstance(sample.get(k), (str, int))), None)
+
+        y_key = next((k for k in preferred_y_keys if k in keys), None)
+        if not y_key:
+            y_key = next((k for k in keys if isinstance(sample.get(k), (int, float))), None)
+
+        if not x_key or not y_key:
+            return None
+
+        series = {}
+        for row in raw_data:
+            x = row.get(x_key)
+            y = row.get(y_key)
+            if x is None or y is None:
+                continue
+            try:
+                y_num = float(y)
+            except (TypeError, ValueError):
+                continue
+            label = str(x)
+            series[label] = series.get(label, 0.0) + y_num
+
+        if not series:
+            return None
+
+        x_axis = sorted(series.keys())[-14:]
+        y_axis = [round(series[x], 2) for x in x_axis]
+        return ChartConfig(
+            type="line",
+            x_axis=x_axis,
+            y_axis=y_axis,
+            metrics_label=y_key
+        )
+
     # ------------------------------------------------------------------
     # DATOS DE PAUTA REAL (UA_ECOMM)
     # ------------------------------------------------------------------
@@ -206,6 +261,9 @@ class SnowflakeService:
         try:
             # 1. Datos reales de pauta (UA_ECOMM)
             ads_context, raw_data, chart_config = self._build_ads_context(cursor, query)
+            if not chart_config and self._wants_chart(query):
+                chart_config = self._build_fallback_chart(raw_data)
+
             render_type = "chart" if chart_config else ("table" if raw_data else "text")
 
             # 2. Contexto RAG de reportes y fórmulas
