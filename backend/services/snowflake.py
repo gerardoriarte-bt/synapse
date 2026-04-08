@@ -38,12 +38,7 @@ class SnowflakeService:
             conn_params["password"] = os.getenv('SNOWFLAKE_PASSWORD')
 
         self.conn = snowflake.connector.connect(**conn_params)
-        # PAT: la sesión puede estar restringida y no permitir USE ROLE; el rol ya va en connect.
-        cur = self.conn.cursor()
-        try:
-            cur.execute(f"USE WAREHOUSE {warehouse}")
-        finally:
-            cur.close()
+        # PAT: sesión restringida; no ejecutar USE ROLE / USE WAREHOUSE aquí (ya van en connect).
 
     # ------------------------------------------------------------------
     # DATOS DE PAUTA REAL (UA_ECOMM)
