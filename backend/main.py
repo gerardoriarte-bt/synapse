@@ -3,6 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
 from pydantic import BaseModel
 from services.snowflake import SnowflakeService
+from services.cortex_analyst import process_with_cortex_analyst, validate_cortex_analyst_config
 from database.database import get_db
 from database.models import Conversation, init_db
 from dotenv import load_dotenv
@@ -106,6 +107,17 @@ async def snowflake_health():
     
     return results
 
+
+@app.get("/api/health/cortex-analyst")
+async def cortex_analyst_health():
+    """Valida configuración de Cortex Analyst (sin consumir la API de inferencia)."""
+    mode = os.getenv("SYNAPSE_QUERY_MODE", "legacy").strip().lower()
+    if mode != "cortex_analyst":
+        return {"mode": mode, "cortex_analyst_configured": False}
+    v = validate_cortex_analyst_config()
+    return {"mode": mode, "cortex_analyst_configured": v["ok"], **v}
+
+
 @app.post("/api/synapse/ask")
 async def ask_synapse(request: QueryRequest, db: Session = Depends(get_db)):
     try:
@@ -119,15 +131,19 @@ async def ask_synapse(request: QueryRequest, db: Session = Depends(get_db)):
 
         history = [{"q": c.query, "a": c.narrative} for c in reversed(past_interactions)]
 
-        # 2. Procesar consulta (datos + narrativa del modelo)
-        agent = SnowflakeService(tenant_id=request.tenant_id)
-        
         target_query = request.query
         if is_intelligence:
-            # Query forzada para el Dashboard Estratégico
-            target_query = "REALIZA UN ANÁLISIS ESTRATÉGICO DEL ROAS Y GASTO DE LAS ÚLTIMAS SEMANAS. DEFINE UN PROBLEMA, UNA EVIDENCIA Y UNA SOLUCIÓN CONCRETA."
-            
-        response = agent.process_query(target_query, history=history)
+            target_query = (
+                "REALIZA UN ANÁLISIS ESTRATÉGICO DEL ROAS Y GASTO DE LAS ÚLTIMAS SEMANAS. "
+                "DEFINE UN PROBLEMA, UNA EVIDENCIA Y UNA SOLUCIÓN CONCRETA."
+            )
+
+        mode = os.getenv("SYNAPSE_QUERY_MODE", "legacy").strip().lower()
+        if mode == "cortex_analyst":
+            response = process_with_cortex_analyst(target_query, history)
+        else:
+            agent = SnowflakeService(tenant_id=request.tenant_id)
+            response = agent.process_query(target_query, history=history)
 
         # 3. Persistir en Postgres
         new_conv = Conversation(

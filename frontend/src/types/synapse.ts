@@ -29,4 +29,6 @@ export interface SynapseResponse {
   chart_config?: ChartConfig;
   raw_data?: any[];
   decision_meta?: DecisionMeta;
+  /** Presente si el backend usa modo Cortex Analyst */
+  cortex_analyst?: Record<string, unknown>;
 }

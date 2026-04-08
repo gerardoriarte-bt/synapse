@@ -19,39 +19,46 @@ GOLD_DB    = "DB_BT_UA"
 GOLD_SCHEMA = "BT_UA_MART_ANALYTICS"
 
 
+def build_snowflake_connection_params() -> Dict[str, Any]:
+    """Parámetros de conexión (PAT o password); reutilizable por Cortex Analyst y SnowflakeService."""
+    token = os.getenv("SNOWFLAKE_TOKEN", "").strip()
+    user = os.getenv("SNOWFLAKE_USER", "").strip().upper()
+    account = os.getenv("SNOWFLAKE_ACCOUNT", "").strip().upper()
+    role = os.getenv("SNOWFLAKE_ROLE", "SYNAPSE_APP_ROLE").strip().upper()
+    warehouse = os.getenv("SNOWFLAKE_WAREHOUSE", "COMPUTE_WH").strip().upper()
+    schema = os.getenv("SNOWFLAKE_SCHEMA", RAG_SCHEMA).strip().upper()
+
+    conn_params: Dict[str, Any] = {
+        "user": user,
+        "account": account,
+        "database": os.getenv("SNOWFLAKE_DATABASE", RAG_DB),
+        "warehouse": warehouse,
+        "schema": schema,
+        "role": role,
+        "client_prefetch_mfa_token": False,
+        "client_request_mfa_token": False,
+    }
+
+    if token:
+        conn_params.pop("role", None)
+        print(f"[Snowflake] Connecting via Token (User: {user}, Account: {account})")
+        conn_params["authenticator"] = "PROGRAMMATIC_ACCESS_TOKEN"
+        conn_params["token"] = token
+    else:
+        print("[Snowflake] Connecting via Password")
+        conn_params["password"] = os.getenv("SNOWFLAKE_PASSWORD")
+
+    return conn_params
+
+
+def connect_snowflake():
+    return snowflake.connector.connect(**build_snowflake_connection_params())
+
+
 class SnowflakeService:
     def __init__(self, tenant_id: str):
-        token = os.getenv('SNOWFLAKE_TOKEN', '').strip()
-        user = os.getenv('SNOWFLAKE_USER', '').strip().upper()
-        account = os.getenv('SNOWFLAKE_ACCOUNT', '').strip().upper()
-        role = os.getenv("SNOWFLAKE_ROLE", "SYNAPSE_APP_ROLE").strip().upper()
-        warehouse = os.getenv('SNOWFLAKE_WAREHOUSE', 'COMPUTE_WH').strip().upper()
-        schema = os.getenv("SNOWFLAKE_SCHEMA", RAG_SCHEMA).strip().upper()
-
-        conn_params = {
-            "user": user,
-            "account": account,
-            "database": os.getenv('SNOWFLAKE_DATABASE', RAG_DB),
-            "warehouse": warehouse,
-            "schema": schema,
-            "role": role,
-            "client_prefetch_mfa_token": False,
-            "client_request_mfa_token": False,
-        }
-
-        if token:
-            # PAT (Programmatic Access Token): no enviar `role` en el connect string.
-            # Aunque el usuario tenga GRANT USAGE ON ROLE, el conector puede rechazarlo;
-            # la sesión usa el DEFAULT_ROLE del usuario (debe ser SYNAPSE_APP_ROLE).
-            conn_params.pop("role", None)
-            print(f"[Snowflake] Connecting via Token (User: {user}, Account: {account})")
-            conn_params["authenticator"] = "PROGRAMMATIC_ACCESS_TOKEN"
-            conn_params["token"] = token
-        else:
-            print("[Snowflake] Connecting via Password")
-            conn_params["password"] = os.getenv('SNOWFLAKE_PASSWORD')
-
-        self.conn = snowflake.connector.connect(**conn_params)
+        _ = tenant_id
+        self.conn = connect_snowflake()
         self.gold_db = os.getenv("SNOWFLAKE_GOLD_DATABASE", GOLD_DB).strip().upper()
         self.gold_schema = os.getenv("SNOWFLAKE_GOLD_SCHEMA", GOLD_SCHEMA).strip().upper()
 

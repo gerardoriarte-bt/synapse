@@ -31,3 +31,5 @@ class SynapseResponse(BaseModel):
     chart_config: Optional[ChartConfig] = None
     raw_data: Optional[List[Dict]] = None
     decision_meta: Optional[DecisionMeta] = None
+    # Metadatos opcionales cuando SYNAPSE_QUERY_MODE=cortex_analyst (SQL generado, avisos, etc.)
+    cortex_analyst: Optional[Dict[str, Any]] = None
