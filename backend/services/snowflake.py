@@ -7,7 +7,8 @@ from models.synapse import SynapseResponse, ChartConfig, DecisionMeta, Recommend
 
 RAG_DB     = "DB_BT_UA"
 RAG_SCHEMA = "BT_UA_MART_ANALYTICS"
-ADS_DB     = "UA_DATABASE"
+GOLD_DB    = "DB_BT_UA"
+GOLD_SCHEMA = "BT_UA_MART_ANALYTICS"
 
 
 class SnowflakeService:
@@ -43,8 +44,8 @@ class SnowflakeService:
             conn_params["password"] = os.getenv('SNOWFLAKE_PASSWORD')
 
         self.conn = snowflake.connector.connect(**conn_params)
-        self.ads_db = os.getenv("SNOWFLAKE_ADS_DATABASE", ADS_DB).strip().upper()
-        self.ads_schema = os.getenv("SNOWFLAKE_ADS_SCHEMA", "UA_ECOMM").strip().upper()
+        self.gold_db = os.getenv("SNOWFLAKE_GOLD_DATABASE", GOLD_DB).strip().upper()
+        self.gold_schema = os.getenv("SNOWFLAKE_GOLD_SCHEMA", GOLD_SCHEMA).strip().upper()
 
     def _wants_chart(self, query: str) -> bool:
         chart_terms = [
@@ -186,13 +187,24 @@ class SnowflakeService:
         }
 
     def _aggregate_target_window(self, cursor, start: date, end: date) -> Dict[str, float]:
+        # Guardrail estricto: solo capa Gold.
+        # Si no existe tabla de targets en Gold, se mantiene en 0 para marcar unavailable.
+        target_table = os.getenv("SNOWFLAKE_GOLD_TARGET_TABLE", "").strip()
+        if not target_table:
+            return {
+                "gasto_target": 0.0,
+                "revenue_target": 0.0,
+                "ordenes_target": 0.0,
+                "unidades_target": 0.0,
+            }
+
         cursor.execute(f"""
             SELECT
-                COALESCE(SUM(TRY_TO_DECIMAL(REGEXP_REPLACE(DAILY_BUDGET_GROSS_TARGET, '[^0-9.-]', ''))), 0) AS GASTO_TARGET,
-                COALESCE(SUM(TRY_TO_DECIMAL(REGEXP_REPLACE(REVENUE_USD_TOTAL_TARGET, '[^0-9.-]', ''))), 0) AS REVENUE_TARGET,
-                COALESCE(SUM(TRY_TO_DECIMAL(REGEXP_REPLACE(ORDERS_TOTAL_TARGET, '[^0-9.-]', ''))), 0) AS ORDENES_TARGET,
-                COALESCE(SUM(TRY_TO_DECIMAL(REGEXP_REPLACE(UNITS_TOTAL_TARGET, '[^0-9.-]', ''))), 0) AS UNIDADES_TARGET
-            FROM UA_DATABASE.UA_ECOMM.UA_TARGETS_ECOMM
+                COALESCE(SUM(TRY_TO_DECIMAL(REGEXP_REPLACE(GASTO_TARGET, '[^0-9.-]', ''))), 0) AS GASTO_TARGET,
+                COALESCE(SUM(TRY_TO_DECIMAL(REGEXP_REPLACE(REVENUE_TARGET, '[^0-9.-]', ''))), 0) AS REVENUE_TARGET,
+                COALESCE(SUM(TRY_TO_DECIMAL(REGEXP_REPLACE(ORDENES_TARGET, '[^0-9.-]', ''))), 0) AS ORDENES_TARGET,
+                COALESCE(SUM(TRY_TO_DECIMAL(REGEXP_REPLACE(UNIDADES_TARGET, '[^0-9.-]', ''))), 0) AS UNIDADES_TARGET
+            FROM {target_table}
             WHERE DATE BETWEEN '{start}' AND '{end}'
         """)
         row = cursor.fetchone() or (0, 0, 0, 0)
@@ -500,20 +512,20 @@ class SnowflakeService:
 
     def _get_top_products_by_source(self, cursor, limit: int = 5) -> Tuple[List[Dict], Optional[ChartConfig]]:
         """
-        Usa ADOBE_SESSION para aproximar 'productos' por TRACKING_CODE, con fuente en DATA_SOURCE_NAME.
+        Usa capa Gold para top productos por fuente.
         """
         try:
             cursor.execute(f"""
                 SELECT
-                    TRACKING_CODE                              AS PRODUCTO,
-                    DATA_SOURCE_NAME                           AS FUENTE,
-                    SUM(ORDERS)                                AS ORDENES,
-                    SUM(UNITS)                                 AS UNIDADES,
-                    SUM(REVENUE)                               AS REVENUE
-                FROM {self.ads_db}.{self.ads_schema}.ADOBE_SESSION
-                WHERE TRACKING_CODE IS NOT NULL
-                GROUP BY TRACKING_CODE, DATA_SOURCE_NAME
-                ORDER BY SUM(UNITS) DESC
+                    NOMBRE_PRODUCTO_POR_ID_PRODUCTO            AS PRODUCTO,
+                    COALESCE(FUENTE, 'SIN_FUENTE')             AS FUENTE,
+                    COUNT(DISTINCT ID_CLIENTE)                 AS ORDENES,
+                    SUM(UNIDADES_VENDIDAS)                     AS UNIDADES,
+                    SUM(INGRESOS_USD)                          AS REVENUE
+                FROM {self.gold_db}.{self.gold_schema}.VENTAS_PRODUCTOS_FUENTE
+                WHERE NOMBRE_PRODUCTO_POR_ID_PRODUCTO IS NOT NULL
+                GROUP BY NOMBRE_PRODUCTO_POR_ID_PRODUCTO, COALESCE(FUENTE, 'SIN_FUENTE')
+                ORDER BY SUM(UNIDADES_VENDIDAS) DESC
                 LIMIT {limit}
             """)
             rows = cursor.fetchall()
@@ -584,78 +596,52 @@ class SnowflakeService:
     # ------------------------------------------------------------------
 
     def _get_platform_metrics(self, cursor, platform: str) -> List[Dict]:
-        """Obtiene métricas reales con ROAS calculado (CONVERSION_VALUE / COST)."""
-        platform_sources = {
-            "GOOGLE": [
-                {"table": "GOOGLE_ADS_METRICAS", "revenue_col": "CONVERSION_VALUE", "conv_col": "CONVERSIONS"},
-                {"table": "GOOGLEADS_UA_MX_GOOGLE_ADS_METRICS", "revenue_col": "CONVERSION_VALUE", "conv_col": "CONVERSIONS"},
-            ],
-            "FACEBOOK": [
-                {"table": "FACEBOOK_ADS_METRICAS", "revenue_col": "CONVERSION_VALUE", "conv_col": "CONVERSIONS"},
-                {"table": "FBADS_UA_MX_FB_ADS_METRICS", "revenue_col": "CONVERSION_VALUE", "conv_col": "OFFSITE_CONVERSIONS_FB_PIXEL_PURCHASE"},
-            ],
-            "CRITEO": [
-                {"table": "CRITEO_ADS_METRICAS", "revenue_col": "CONVERSION_VALUE", "conv_col": "CONVERSIONS"},
-                {"table": "CRI_UA_MX_CRITEO_METRICS", "revenue_col": "REVENUE", "conv_col": "SALES_COUNT"},
-            ],
-        }
-
-        for src in platform_sources.get(platform, []):
-            table = src["table"]
-            revenue_col = src["revenue_col"]
-            conv_col = src["conv_col"]
-            try:
-                cursor.execute(f"""
-                    SELECT
-                        DATE,
-                        CAMPAIGN_ID,
-                        SUM(COST)                                          AS GASTO,
-                        SUM({conv_col})                                    AS CONVERSIONES,
-                        SUM({revenue_col})                                 AS REVENUE,
-                        SUM(CLICKS)                                        AS CLICKS,
-                        SUM(IMPRESSIONS)                                   AS IMPRESIONES,
-                        ROUND(
-                            SUM({revenue_col}) / NULLIF(SUM(COST), 0), 2
-                        )                                                  AS ROAS
-                    FROM {self.ads_db}.{self.ads_schema}.{table}
-                    GROUP BY DATE, CAMPAIGN_ID
-                    ORDER BY DATE DESC
-                    LIMIT 30
-                """)
-                rows = cursor.fetchall()
-                cols = [desc[0] for desc in cursor.description]
-                if rows:
-                    return [dict(zip(cols, row)) for row in rows]
-            except Exception as e:
-                print(f"{platform} metrics source warning ({table}): {e}")
-                continue
-
-        print(f"{platform} metrics warning: no se encontraron fuentes compatibles.")
-        return []
+        """Obtiene métricas reales desde capa Gold FCT_PERFORMANCE."""
+        try:
+            cursor.execute(f"""
+                SELECT
+                    DATE,
+                    COALESCE(CAMPAIGN_PRIMARIO, 'SIN_CAMPAÑA')            AS CAMPAIGN_ID,
+                    SUM(COST_USD)                                         AS GASTO,
+                    SUM(ORDENES_VENDIDAS)                                 AS CONVERSIONES,
+                    SUM(INGRESOS_USD)                                     AS REVENUE,
+                    SUM(CLICKS)                                           AS CLICKS,
+                    SUM(IMPRESSIONS)                                      AS IMPRESIONES,
+                    ROUND(SUM(INGRESOS_USD) / NULLIF(SUM(COST_USD), 0), 2) AS ROAS
+                FROM {self.gold_db}.{self.gold_schema}.FCT_PERFORMANCE
+                WHERE UPPER(COALESCE(FUENTE, '')) LIKE '%{platform}%'
+                GROUP BY DATE, COALESCE(CAMPAIGN_PRIMARIO, 'SIN_CAMPAÑA')
+                ORDER BY DATE DESC
+                LIMIT 30
+            """)
+            rows = cursor.fetchall()
+            cols = [desc[0] for desc in cursor.description]
+            return [dict(zip(cols, row)) for row in rows] if rows else []
+        except Exception as e:
+            print(f"{platform} metrics gold warning: {e}")
+            return []
 
     def _get_sales_data(self, cursor) -> List[Dict]:
-        """Obtiene datos de ventas reales desde UA_ECOMM."""
-        sales_sources = [
-            "VENTAS_POR_PLATAFORMA_Y_ID_CLIENTE",
-            "UA_TARGETS_ECOMM",
-            "ADOBE_SESSION",
-        ]
-        for table in sales_sources:
-            try:
-                cursor.execute(f"""
-                    SELECT *
-                    FROM {self.ads_db}.{self.ads_schema}.{table}
-                    ORDER BY 1 DESC
-                    LIMIT 10
-                """)
-                rows = cursor.fetchall()
-                cols = [desc[0] for desc in cursor.description]
-                if rows:
-                    return [dict(zip(cols, row)) for row in rows]
-            except Exception as e:
-                print(f"VENTAS source warning ({table}): {e}")
-                continue
-        return []
+        """Obtiene datos de ventas reales desde capa Gold."""
+        try:
+            cursor.execute(f"""
+                SELECT
+                    DATE,
+                    COALESCE(FUENTE, 'SIN_FUENTE')                    AS FUENTE,
+                    SUM(ORDENES_VENDIDAS)                             AS ORDENES,
+                    SUM(UNIDADES_VENDIDAS)                            AS UNIDADES,
+                    SUM(INGRESOS_USD)                                 AS REVENUE
+                FROM {self.gold_db}.{self.gold_schema}.FCT_PERFORMANCE
+                GROUP BY DATE, COALESCE(FUENTE, 'SIN_FUENTE')
+                ORDER BY DATE DESC
+                LIMIT 20
+            """)
+            rows = cursor.fetchall()
+            cols = [desc[0] for desc in cursor.description]
+            return [dict(zip(cols, row)) for row in rows] if rows else []
+        except Exception as e:
+            print(f"VENTAS gold warning: {e}")
+            return []
 
     def _build_ads_context(self, cursor, query: str) -> Tuple[str, List, Optional[ChartConfig]]:
         """Construye contexto de datos de pauta con detección de plataforma."""
@@ -717,6 +703,36 @@ class SnowflakeService:
                     raw_data = sales
 
         return "\n\n".join(context_parts), raw_data, chart_config
+
+    def _build_no_data_response(self, query: str, intent: str) -> SynapseResponse:
+        narrative = (
+            "No tengo capacidad para responder esta consulta con la data disponible en la capa Gold autorizada. "
+            "Reformula la pregunta usando dimensiones y métricas existentes en Gold "
+            "(por ejemplo: ROAS, gasto, revenue, órdenes, unidades, fuente, campaña, producto)."
+        )
+        decision_meta = DecisionMeta(
+            intent=intent,
+            confidence_score=0.0,
+            data_freshness="unknown",
+            guardrails=[
+                "Guardrail estricto activo: solo se permiten respuestas sustentadas por tablas Gold.",
+                f"Consulta sin evidencia suficiente en Gold: '{query[:120]}'",
+            ],
+            comparisons={
+                "week_over_week": {"status": "unavailable", "reason": "Sin datos Gold para esta consulta."},
+                "vs_target": {"status": "unavailable", "reason": "Sin datos Gold para esta consulta."},
+                "vs_last_year": {"status": "unavailable", "reason": "Sin datos Gold para esta consulta."},
+            },
+            actions=[],
+        )
+        return SynapseResponse(
+            response_id=str(uuid.uuid4()),
+            narrative=narrative,
+            render_type="text",
+            chart_config=None,
+            raw_data=None,
+            decision_meta=decision_meta,
+        )
 
     # ------------------------------------------------------------------
     # CONTEXTO RAG (DB_BT_UA)
@@ -787,6 +803,10 @@ class SnowflakeService:
             if not chart_config and self._wants_chart(query):
                 chart_config = self._build_fallback_chart(raw_data)
 
+            # Guardrail estricto: sin evidencia en capa Gold no se responde con narrativa inventada.
+            if not raw_data:
+                return self._build_no_data_response(query=query, intent=intent)
+
             render_type = "chart" if chart_config else ("table" if raw_data else "text")
 
             freshness = self._get_data_freshness(raw_data)
@@ -813,11 +833,11 @@ class SnowflakeService:
 
             # 4. Prompt para Cortex
             prompt = f"""Eres Synapse, Analista de Marketing Senior de la agencia Buentipo.
-Tienes acceso a datos reales de Snowflake de campañas digitales en Google, Facebook y Criteo.
+Tienes acceso exclusivamente a tablas de la capa Gold en Snowflake.
 Responde de forma ejecutiva, directa y orientada a la acción estratégica.
 
 {f"HISTORIAL:{chr(10)}{history_context}{chr(10)}" if history_context else ""}
-{f"DATOS DE PAUTA REAL (Snowflake UA_ECOMM):{chr(10)}{ads_context}{chr(10)}" if ads_context else ""}
+{f"DATOS REALES CAPA GOLD (Snowflake DB_BT_UA.BT_UA_MART_ANALYTICS):{chr(10)}{ads_context}{chr(10)}" if ads_context else ""}
 {f"CONTEXTO Y FÓRMULAS (Snowflake DB_BT_UA):{chr(10)}{rag_context}{chr(10)}" if rag_context else ""}
 PREGUNTA: {query}
 
