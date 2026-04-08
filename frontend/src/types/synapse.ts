@@ -5,10 +5,28 @@ export interface ChartConfig {
   metrics_label: string;
 }
 
+export interface RecommendedAction {
+  action: string;
+  owner: 'medios' | 'planning' | 'estrategia';
+  horizon: '24h' | '7d' | '30d';
+  expected_impact: string;
+  priority_score: number;
+}
+
+export interface DecisionMeta {
+  intent: string;
+  confidence_score: number;
+  data_freshness: string;
+  guardrails: string[];
+  comparisons: Record<string, any>;
+  actions: RecommendedAction[];
+}
+
 export interface SynapseResponse {
   response_id: string;
   narrative: string;
   render_type: 'text' | 'chart' | 'table';
   chart_config?: ChartConfig;
   raw_data?: any[];
+  decision_meta?: DecisionMeta;
 }

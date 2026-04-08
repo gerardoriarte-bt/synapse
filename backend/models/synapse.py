@@ -7,9 +7,27 @@ class ChartConfig(BaseModel):
     y_axis: List[float]
     metrics_label: str
 
+
+class RecommendedAction(BaseModel):
+    action: str
+    owner: str  # "medios" | "planning" | "estrategia"
+    horizon: str  # "24h" | "7d" | "30d"
+    expected_impact: str
+    priority_score: float
+
+
+class DecisionMeta(BaseModel):
+    intent: str
+    confidence_score: float
+    data_freshness: str
+    guardrails: List[str]
+    comparisons: Dict[str, Any]
+    actions: List[RecommendedAction]
+
 class SynapseResponse(BaseModel):
     response_id: str
     narrative: str
     render_type: str  # "text", "chart", "table"
     chart_config: Optional[ChartConfig] = None
     raw_data: Optional[List[Dict]] = None
+    decision_meta: Optional[DecisionMeta] = None

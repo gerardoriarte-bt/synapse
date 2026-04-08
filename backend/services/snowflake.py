@@ -1,8 +1,9 @@
 import snowflake.connector
 import os
 import uuid
-from typing import Optional, Union, List, Tuple, Dict
-from models.synapse import SynapseResponse, ChartConfig
+from datetime import date, datetime, timedelta
+from typing import Optional, Union, List, Tuple, Dict, Any
+from models.synapse import SynapseResponse, ChartConfig, DecisionMeta, RecommendedAction
 
 RAG_DB     = "DB_BT_UA"
 RAG_SCHEMA = "BT_UA_MART_ANALYTICS"
@@ -78,6 +79,251 @@ class SnowflakeService:
             if word in q:
                 return num
         return default
+
+    def _classify_intent(self, query: str) -> str:
+        q = query.upper()
+        intent_rules = {
+            "budget_reallocation": ["REASIGN", "PRESUPUEST", "BUDGET", "INVERT", "ESCALAR", "PAUSAR"],
+            "forecast": ["FORECAST", "PROYECC", "PREDICC", "ESTIM", "CERRAR MES", "PRONOST"],
+            "diagnostic": ["ANOMAL", "POR QUÉ", "PORQUE", "CAUSA", "CAIDA", "BAJÓ", "SUBIÓ", "RIESGO"],
+            "product_mix": ["PRODUCTO", "PRODUCTOS", "SKU", "ITEM", "PORTAFOLIO"],
+            "performance": ["ROAS", "CTR", "CPC", "CPM", "REVENUE", "CONVERSION", "RENDIMIENTO", "DESEMPE"],
+        }
+        for intent, terms in intent_rules.items():
+            if any(t in q for t in terms):
+                return intent
+        return "general_strategy"
+
+    def _to_date(self, value: Any) -> Optional[date]:
+        if isinstance(value, datetime):
+            return value.date()
+        if isinstance(value, date):
+            return value
+        if isinstance(value, str):
+            for fmt in ("%Y-%m-%d", "%Y/%m/%d"):
+                try:
+                    return datetime.strptime(value[:10], fmt).date()
+                except ValueError:
+                    continue
+        return None
+
+    def _get_data_freshness(self, raw_data: List[Dict]) -> str:
+        dates = [self._to_date(row.get("DATE")) for row in raw_data if "DATE" in row]
+        dates = [d for d in dates if d is not None]
+        if not dates:
+            return "unknown"
+        lag_days = (datetime.utcnow().date() - max(dates)).days
+        if lag_days <= 1:
+            return "fresh_24h"
+        if lag_days <= 7:
+            return "fresh_weekly"
+        return f"stale_{lag_days}d"
+
+    def _compute_comparisons(self, raw_data: List[Dict]) -> Dict[str, Any]:
+        """
+        Compara última semana vs semana previa para ROAS/GASTO/REVENUE cuando hay DATE.
+        """
+        rows = []
+        for row in raw_data:
+            d = self._to_date(row.get("DATE"))
+            if not d:
+                continue
+            rows.append({
+                "DATE": d,
+                "ROAS": float(row.get("ROAS") or 0),
+                "GASTO": float(row.get("GASTO") or 0),
+                "REVENUE": float(row.get("REVENUE") or 0),
+            })
+        if not rows:
+            return {}
+
+        latest = max(r["DATE"] for r in rows)
+        wk_start = latest - timedelta(days=6)
+        prev_start = wk_start - timedelta(days=7)
+        prev_end = wk_start - timedelta(days=1)
+
+        current = [r for r in rows if wk_start <= r["DATE"] <= latest]
+        previous = [r for r in rows if prev_start <= r["DATE"] <= prev_end]
+        if not current or not previous:
+            return {}
+
+        def avg(metric: str, dataset: List[Dict]) -> float:
+            vals = [d[metric] for d in dataset]
+            return round(sum(vals) / len(vals), 2) if vals else 0.0
+
+        comp = {}
+        for m in ["ROAS", "GASTO", "REVENUE"]:
+            cur = avg(m, current)
+            prev = avg(m, previous)
+            delta_pct = round(((cur - prev) / prev) * 100, 2) if prev else None
+            comp[m.lower()] = {"current": cur, "previous": prev, "delta_pct": delta_pct}
+        return comp
+
+    def _build_guardrails(self, raw_data: List[Dict], comparisons: Dict[str, Any]) -> List[str]:
+        guardrails = []
+        if len(raw_data) < 5:
+            guardrails.append("Muestra baja (<5 registros): validar antes de escalar inversión.")
+        if not comparisons:
+            guardrails.append("Comparativo semanal incompleto: faltan datos para vs semana previa.")
+        zero_cost = sum(1 for r in raw_data if float(r.get("GASTO") or 0) == 0)
+        if zero_cost > 0:
+            guardrails.append(f"Se detectaron {zero_cost} filas con gasto cero; revisar tracking/atribución.")
+        high_roas = [float(r.get("ROAS") or 0) for r in raw_data if r.get("ROAS") is not None]
+        if high_roas and max(high_roas) > 80:
+            guardrails.append("Outliers de ROAS detectados (>80x): validar calidad de datos antes de reasignar.")
+        return guardrails
+
+    def _compute_confidence(self, raw_data: List[Dict], freshness: str, guardrails: List[str]) -> float:
+        score = 0.5
+        if len(raw_data) >= 10:
+            score += 0.2
+        if freshness in {"fresh_24h", "fresh_weekly"}:
+            score += 0.2
+        penalty = min(0.3, 0.07 * len(guardrails))
+        score -= penalty
+        return round(max(0.1, min(0.95, score)), 2)
+
+    def _build_recommended_actions(
+        self,
+        intent: str,
+        comparisons: Dict[str, Any],
+        confidence: float,
+    ) -> List[RecommendedAction]:
+        actions: List[RecommendedAction] = []
+        roas_delta = (comparisons.get("roas") or {}).get("delta_pct")
+        spend_delta = (comparisons.get("gasto") or {}).get("delta_pct")
+        revenue_delta = (comparisons.get("revenue") or {}).get("delta_pct")
+
+        if intent in {"budget_reallocation", "performance", "diagnostic"}:
+            actions.append(
+                RecommendedAction(
+                    action="Reasignar 10-15% del presupuesto desde campañas con ROAS bajo al top cuartil de ROAS.",
+                    owner="medios",
+                    horizon="24h",
+                    expected_impact="Mejora esperada de 3-8% en ROAS semanal.",
+                    priority_score=round(0.85 * confidence, 2),
+                )
+            )
+            actions.append(
+                RecommendedAction(
+                    action="Configurar alerta diaria de desvío de gasto y ROAS por campaña (umbral +/-20%).",
+                    owner="planning",
+                    horizon="7d",
+                    expected_impact="Reduce sobreinversión y acelera correcciones tácticas.",
+                    priority_score=round(0.78 * confidence, 2),
+                )
+            )
+            actions.append(
+                RecommendedAction(
+                    action="Ejecutar experimento A/B de segmentación/creatividad en canal con caída relativa.",
+                    owner="estrategia",
+                    horizon="30d",
+                    expected_impact="Incremento potencial de 5-12% en revenue incremental.",
+                    priority_score=round(0.7 * confidence, 2),
+                )
+            )
+        elif intent == "forecast":
+            actions.append(
+                RecommendedAction(
+                    action="Construir forecast semanal de ROAS/Revenue con baseline de últimas 8 semanas.",
+                    owner="planning",
+                    horizon="7d",
+                    expected_impact="Mayor precisión para pacing y cierre de mes.",
+                    priority_score=round(0.8 * confidence, 2),
+                )
+            )
+            actions.append(
+                RecommendedAction(
+                    action="Definir bandas de acción automática (congelar/escalar) según desviación del forecast.",
+                    owner="medios",
+                    horizon="24h",
+                    expected_impact="Menor volatilidad y respuesta táctica más rápida.",
+                    priority_score=round(0.74 * confidence, 2),
+                )
+            )
+            actions.append(
+                RecommendedAction(
+                    action="Revisar supuestos de estacionalidad y eventos comerciales con negocio.",
+                    owner="estrategia",
+                    horizon="30d",
+                    expected_impact="Menor error de pronóstico en picos promocionales.",
+                    priority_score=round(0.66 * confidence, 2),
+                )
+            )
+        else:
+            actions.append(
+                RecommendedAction(
+                    action="Consolidar KPIs por canal/campaña en tablero semanal con owner definido.",
+                    owner="planning",
+                    horizon="7d",
+                    expected_impact="Mejor gobernanza y consistencia de decisiones.",
+                    priority_score=round(0.72 * confidence, 2),
+                )
+            )
+            actions.append(
+                RecommendedAction(
+                    action="Priorizar 3 oportunidades de mayor impacto y ejecutar test controlados.",
+                    owner="estrategia",
+                    horizon="30d",
+                    expected_impact="Aprendizaje continuo y lift incremental sostenido.",
+                    priority_score=round(0.68 * confidence, 2),
+                )
+            )
+            actions.append(
+                RecommendedAction(
+                    action="Alinear pauta diaria con objetivo semanal de revenue y eficiencia.",
+                    owner="medios",
+                    horizon="24h",
+                    expected_impact="Mejor pacing y menor desvío al cierre semanal.",
+                    priority_score=round(0.7 * confidence, 2),
+                )
+            )
+
+        # Ajuste contextual simple por deltas observados.
+        if roas_delta is not None and roas_delta < -10:
+            actions[0].priority_score = round(min(0.99, actions[0].priority_score + 0.08), 2)
+        if spend_delta is not None and spend_delta > 20:
+            actions[1].priority_score = round(min(0.99, actions[1].priority_score + 0.05), 2)
+        if revenue_delta is not None and revenue_delta < 0:
+            actions[2].priority_score = round(min(0.99, actions[2].priority_score + 0.05), 2)
+
+        return sorted(actions, key=lambda a: a.priority_score, reverse=True)[:3]
+
+    def _render_required_sections(self, decision_meta: DecisionMeta) -> str:
+        comparisons = decision_meta.comparisons
+        roas = (comparisons.get("roas") or {}).get("delta_pct")
+        spend = (comparisons.get("gasto") or {}).get("delta_pct")
+        revenue = (comparisons.get("revenue") or {}).get("delta_pct")
+        comps_txt = (
+            f"ROAS vs semana previa: {roas}% | "
+            f"Gasto: {spend}% | Revenue: {revenue}%"
+            if comparisons else "Comparativo semanal no disponible con la data actual."
+        )
+        risks_txt = " | ".join(decision_meta.guardrails) if decision_meta.guardrails else "Sin riesgos críticos detectados."
+
+        actions_lines = []
+        for idx, a in enumerate(decision_meta.actions, start=1):
+            actions_lines.append(
+                f"{idx}) [{a.owner} - {a.horizon}] {a.action} "
+                f"(Impacto: {a.expected_impact}; Prioridad: {a.priority_score})"
+            )
+
+        return (
+            "Situación actual:\n"
+            f"- Intento detectado: {decision_meta.intent}\n"
+            f"- Freshness: {decision_meta.data_freshness}\n"
+            f"- Confianza: {decision_meta.confidence_score}\n"
+            f"- {comps_txt}\n\n"
+            "Causa raíz probable:\n"
+            "- Variabilidad de eficiencia por canal/campaña y/o cobertura de datos parcial.\n\n"
+            "Acciones concretas priorizadas:\n"
+            + "\n".join(actions_lines)
+            + "\n\n"
+            "Impacto estimado:\n"
+            "- Ejecución disciplinada de las 3 acciones debería mejorar eficiencia y control de pacing semanal.\n\n"
+            "Riesgos y guardrails:\n"
+            f"- {risks_txt}"
+        )
 
     def _get_top_products_by_source(self, cursor, limit: int = 5) -> Tuple[List[Dict], Optional[ChartConfig]]:
         """
@@ -353,6 +599,8 @@ class SnowflakeService:
     def process_query(self, query: str, history: List = []) -> SynapseResponse:
         cursor = self.conn.cursor()
         try:
+            intent = self._classify_intent(query)
+
             # 1. Datos reales según intención de consulta
             if self._wants_top_products(query):
                 top_n = self._extract_top_n(query, default=5)
@@ -367,6 +615,20 @@ class SnowflakeService:
                 chart_config = self._build_fallback_chart(raw_data)
 
             render_type = "chart" if chart_config else ("table" if raw_data else "text")
+
+            freshness = self._get_data_freshness(raw_data)
+            comparisons = self._compute_comparisons(raw_data)
+            guardrails = self._build_guardrails(raw_data, comparisons)
+            confidence = self._compute_confidence(raw_data, freshness, guardrails)
+            actions = self._build_recommended_actions(intent, comparisons, confidence)
+            decision_meta = DecisionMeta(
+                intent=intent,
+                confidence_score=confidence,
+                data_freshness=freshness,
+                guardrails=guardrails,
+                comparisons=comparisons,
+                actions=actions,
+            )
 
             # 2. Contexto RAG de reportes y fórmulas
             rag_context = self._get_rag_context(cursor, query)
@@ -388,8 +650,15 @@ PREGUNTA: {query}
 
 INSTRUCCIONES:
 - Usa cifras concretas de los datos cuando estén disponibles.
-- Si hay datos de ROAS, compara plataformas y destaca la más eficiente.
-- Si es consulta estratégica: Situación actual → Hallazgo clave → Recomendación ejecutiva.
+- Incluye comparativo obligatorio vs semana previa cuando exista data.
+- Cita riesgos/guardrails cuando la muestra o calidad de datos sea limitada.
+- Formato obligatorio:
+  1) Situación actual
+  2) Causa raíz probable
+  3) Acciones concretas priorizadas (exactamente 3)
+     - Cada acción debe incluir: owner (medios/planning/estrategia), ventana (24h/7d/30d), impacto estimado.
+  4) Impacto estimado
+  5) Riesgos y guardrails
 - Respuesta concisa, sin saludos."""
 
             prompt_safe = prompt.replace("$$", "__DD__")
@@ -399,12 +668,19 @@ INSTRUCCIONES:
             row = cursor.fetchone()
             narrative = row[0].replace("__DD__", "$$") if row else "No se pudo generar respuesta."
 
+            required_markers = [
+                "Situación", "Causa", "Acciones", "Impacto", "Riesgo"
+            ]
+            if not all(marker.lower() in narrative.lower() for marker in required_markers):
+                narrative = f"{narrative}\n\n{self._render_required_sections(decision_meta)}"
+
             return SynapseResponse(
                 response_id=str(uuid.uuid4()),
                 narrative=narrative,
                 render_type=render_type,
                 chart_config=chart_config,
-                raw_data=raw_data if raw_data else None
+                raw_data=raw_data if raw_data else None,
+                decision_meta=decision_meta,
             )
         finally:
             cursor.close()
