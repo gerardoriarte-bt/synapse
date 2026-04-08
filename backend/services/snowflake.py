@@ -6,7 +6,7 @@ from models.synapse import SynapseResponse, ChartConfig
 
 RAG_DB     = "DB_BT_UA"
 RAG_SCHEMA = "BT_UA_MART_ANALYTICS"
-ADS_DB     = "UA_ECOMM"
+ADS_DB     = "UA_DATABASE"
 
 
 class SnowflakeService:
@@ -42,6 +42,8 @@ class SnowflakeService:
             conn_params["password"] = os.getenv('SNOWFLAKE_PASSWORD')
 
         self.conn = snowflake.connector.connect(**conn_params)
+        self.ads_db = os.getenv("SNOWFLAKE_ADS_DATABASE", ADS_DB).strip().upper()
+        self.ads_schema = os.getenv("SNOWFLAKE_ADS_SCHEMA", "UA_ECOMM").strip().upper()
 
     def _wants_chart(self, query: str) -> bool:
         chart_terms = [
@@ -104,48 +106,77 @@ class SnowflakeService:
 
     def _get_platform_metrics(self, cursor, platform: str) -> List[Dict]:
         """Obtiene métricas reales con ROAS calculado (CONVERSION_VALUE / COST)."""
-        try:
-            # Google Ads usa DATE, COST, CONVERSION_VALUE, CLICKS, CONVERSIONS
-            # Facebook y Criteo presumiblemente tienen columnas similares
-            cursor.execute(f"""
-                SELECT
-                    DATE,
-                    CAMPAIGN_ID,
-                    SUM(COST)                                          AS GASTO,
-                    SUM(CONVERSIONS)                                   AS CONVERSIONES,
-                    SUM(CONVERSION_VALUE)                              AS REVENUE,
-                    SUM(CLICKS)                                        AS CLICKS,
-                    SUM(IMPRESSIONS)                                   AS IMPRESIONES,
-                    ROUND(
-                        SUM(CONVERSION_VALUE) / NULLIF(SUM(COST), 0), 2
-                    )                                                  AS ROAS
-                FROM {ADS_DB}.PUBLIC.{platform}_ADS_METRICAS
-                GROUP BY DATE, CAMPAIGN_ID
-                ORDER BY DATE DESC
-                LIMIT 30
-            """)
-            rows = cursor.fetchall()
-            cols = [desc[0] for desc in cursor.description]
-            return [dict(zip(cols, row)) for row in rows] if rows else []
-        except Exception as e:
-            print(f"{platform} metrics warning: {e}")
-            return []
+        platform_sources = {
+            "GOOGLE": [
+                {"table": "GOOGLE_ADS_METRICAS", "revenue_col": "CONVERSION_VALUE", "conv_col": "CONVERSIONS"},
+                {"table": "GOOGLEADS_UA_MX_GOOGLE_ADS_METRICS", "revenue_col": "CONVERSION_VALUE", "conv_col": "CONVERSIONS"},
+            ],
+            "FACEBOOK": [
+                {"table": "FACEBOOK_ADS_METRICAS", "revenue_col": "CONVERSION_VALUE", "conv_col": "CONVERSIONS"},
+                {"table": "FBADS_UA_MX_FB_ADS_METRICS", "revenue_col": "CONVERSION_VALUE", "conv_col": "OFFSITE_CONVERSIONS_FB_PIXEL_PURCHASE"},
+            ],
+            "CRITEO": [
+                {"table": "CRITEO_ADS_METRICAS", "revenue_col": "CONVERSION_VALUE", "conv_col": "CONVERSIONS"},
+                {"table": "CRI_UA_MX_CRITEO_METRICS", "revenue_col": "REVENUE", "conv_col": "SALES_COUNT"},
+            ],
+        }
+
+        for src in platform_sources.get(platform, []):
+            table = src["table"]
+            revenue_col = src["revenue_col"]
+            conv_col = src["conv_col"]
+            try:
+                cursor.execute(f"""
+                    SELECT
+                        DATE,
+                        CAMPAIGN_ID,
+                        SUM(COST)                                          AS GASTO,
+                        SUM({conv_col})                                    AS CONVERSIONES,
+                        SUM({revenue_col})                                 AS REVENUE,
+                        SUM(CLICKS)                                        AS CLICKS,
+                        SUM(IMPRESSIONS)                                   AS IMPRESIONES,
+                        ROUND(
+                            SUM({revenue_col}) / NULLIF(SUM(COST), 0), 2
+                        )                                                  AS ROAS
+                    FROM {self.ads_db}.{self.ads_schema}.{table}
+                    GROUP BY DATE, CAMPAIGN_ID
+                    ORDER BY DATE DESC
+                    LIMIT 30
+                """)
+                rows = cursor.fetchall()
+                cols = [desc[0] for desc in cursor.description]
+                if rows:
+                    return [dict(zip(cols, row)) for row in rows]
+            except Exception as e:
+                print(f"{platform} metrics source warning ({table}): {e}")
+                continue
+
+        print(f"{platform} metrics warning: no se encontraron fuentes compatibles.")
+        return []
 
     def _get_sales_data(self, cursor) -> List[Dict]:
         """Obtiene datos de ventas reales desde UA_ECOMM."""
-        try:
-            cursor.execute(f"""
-                SELECT *
-                FROM {ADS_DB}.PUBLIC.VENTAS_POR_PLATAFORMA_Y_ID_CLIENTE
-                ORDER BY 1 DESC
-                LIMIT 10
-            """)
-            rows = cursor.fetchall()
-            cols = [desc[0] for desc in cursor.description]
-            return [dict(zip(cols, row)) for row in rows] if rows else []
-        except Exception as e:
-            print(f"VENTAS warning: {e}")
-            return []
+        sales_sources = [
+            "VENTAS_POR_PLATAFORMA_Y_ID_CLIENTE",
+            "UA_TARGETS_ECOMM",
+            "ADOBE_SESSION",
+        ]
+        for table in sales_sources:
+            try:
+                cursor.execute(f"""
+                    SELECT *
+                    FROM {self.ads_db}.{self.ads_schema}.{table}
+                    ORDER BY 1 DESC
+                    LIMIT 10
+                """)
+                rows = cursor.fetchall()
+                cols = [desc[0] for desc in cursor.description]
+                if rows:
+                    return [dict(zip(cols, row)) for row in rows]
+            except Exception as e:
+                print(f"VENTAS source warning ({table}): {e}")
+                continue
+        return []
 
     def _build_ads_context(self, cursor, query: str) -> Tuple[str, List, Optional[ChartConfig]]:
         """Construye contexto de datos de pauta con detección de plataforma."""
