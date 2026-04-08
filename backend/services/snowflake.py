@@ -229,11 +229,18 @@ class SnowflakeService:
                     "previous": previous.get(key),
                     "delta_pct": self._delta_pct(current.get(key), previous.get(key)),
                 }
-            output["week_over_week"] = {
-                "status": "ok",
-                "window": {"current_start": str(start), "current_end": str(end)},
-                "metrics": wow_metrics,
-            }
+            if all((previous.get(k) or 0) == 0 for k in ["gasto", "revenue", "ordenes", "unidades"]):
+                output["week_over_week"] = {
+                    "status": "unavailable",
+                    "reason": "La ventana previa no tiene base de comparación (>0).",
+                    "window": {"current_start": str(start), "current_end": str(end)},
+                }
+            else:
+                output["week_over_week"] = {
+                    "status": "ok",
+                    "window": {"current_start": str(start), "current_end": str(end)},
+                    "metrics": wow_metrics,
+                }
 
             target_metrics = {}
             mapping = {
@@ -250,11 +257,18 @@ class SnowflakeService:
                     "target": tgt,
                     "gap_pct": self._delta_pct(actual, tgt),
                 }
-            output["vs_target"] = {
-                "status": "ok",
-                "window": {"start": str(start), "end": str(end)},
-                "metrics": target_metrics,
-            }
+            if all((target.get(k) or 0) == 0 for k in ["gasto_target", "revenue_target", "ordenes_target", "unidades_target"]):
+                output["vs_target"] = {
+                    "status": "unavailable",
+                    "reason": "No hay targets cargados para la ventana analizada.",
+                    "window": {"start": str(start), "end": str(end)},
+                }
+            else:
+                output["vs_target"] = {
+                    "status": "ok",
+                    "window": {"start": str(start), "end": str(end)},
+                    "metrics": target_metrics,
+                }
 
             yoy_metrics = {}
             for key in ["roas", "gasto", "revenue", "ordenes", "unidades"]:
@@ -263,16 +277,28 @@ class SnowflakeService:
                     "last_year": last_year.get(key),
                     "delta_pct": self._delta_pct(current.get(key), last_year.get(key)),
                 }
-            output["vs_last_year"] = {
-                "status": "ok",
-                "window": {
-                    "current_start": str(start),
-                    "current_end": str(end),
-                    "last_year_start": str(ly_start),
-                    "last_year_end": str(ly_end),
-                },
-                "metrics": yoy_metrics,
-            }
+            if all((last_year.get(k) or 0) == 0 for k in ["gasto", "revenue", "ordenes", "unidades"]):
+                output["vs_last_year"] = {
+                    "status": "unavailable",
+                    "reason": "No hay datos del mismo periodo del año anterior.",
+                    "window": {
+                        "current_start": str(start),
+                        "current_end": str(end),
+                        "last_year_start": str(ly_start),
+                        "last_year_end": str(ly_end),
+                    },
+                }
+            else:
+                output["vs_last_year"] = {
+                    "status": "ok",
+                    "window": {
+                        "current_start": str(start),
+                        "current_end": str(end),
+                        "last_year_start": str(ly_start),
+                        "last_year_end": str(ly_end),
+                    },
+                    "metrics": yoy_metrics,
+                }
             return output
         except Exception as e:
             output["week_over_week"]["reason"] = f"error: {str(e)}"
