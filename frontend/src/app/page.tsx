@@ -11,6 +11,7 @@ import { Send, Zap, Activity, Sparkles } from 'lucide-react';
 interface ChatMessage {
   query: string;
   response: any;
+  createdAt: string;
 }
 
 export default function Home() {
@@ -18,21 +19,32 @@ export default function Home() {
   const [query, setQuery] = useState('');
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [intelligenceData, setIntelligenceData] = useState<any>(null);
+  const [lastIntelligenceQuery, setLastIntelligenceQuery] = useState<string | null>(null);
   
   const { askSynapse, isLoading, response, error } = useSynapseQuery();
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const pendingQueryRef = useRef<string | null>(null);
+  const pendingViewRef = useRef<'chat' | 'intelligence'>('chat');
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   };
 
   useEffect(() => {
-    if (response) {
-      if (view === 'chat') {
-        setMessages(prev => [...prev, { query: prev[prev.length - 1]?.query || "Última consulta", response }]);
-      } else {
+    if (response && pendingQueryRef.current) {
+      const messageEntry: ChatMessage = {
+        query: pendingQueryRef.current,
+        response,
+        createdAt: new Date().toISOString(),
+      };
+      setMessages(prev => [...prev, messageEntry]);
+
+      if (pendingViewRef.current === 'intelligence') {
         setIntelligenceData(response);
+        setLastIntelligenceQuery(pendingQueryRef.current);
       }
+
+      pendingQueryRef.current = null;
       scrollToBottom();
     }
   }, [response]);
@@ -42,12 +54,17 @@ export default function Home() {
     if (!query.trim()) return;
     const currentQuery = query;
     setQuery('');
+    pendingQueryRef.current = currentQuery;
+    pendingViewRef.current = 'chat';
     await askSynapse(currentQuery);
   };
 
   const generateIntelligence = async () => {
+    const intelligenceQuery = "GENERATE STRATEGIC INTELLIGENCE REPORT";
+    pendingQueryRef.current = intelligenceQuery;
+    pendingViewRef.current = 'intelligence';
     setView('intelligence');
-    await askSynapse("GENERATE STRATEGIC INTELLIGENCE REPORT");
+    await askSynapse(intelligenceQuery);
   };
 
   return (
@@ -55,14 +72,25 @@ export default function Home() {
       <div className="flex flex-col min-h-full">
         {view === 'intelligence' ? (
           <div className="space-y-10">
+             {lastIntelligenceQuery && (
+               <div className="rounded-2xl border border-zinc-800 bg-zinc-900/30 p-5">
+                 <p className="text-[10px] font-black uppercase tracking-[0.2em] text-zinc-500">Consulta ejecutada</p>
+                 <p className="mt-2 text-zinc-100 font-semibold leading-relaxed">{lastIntelligenceQuery}</p>
+               </div>
+             )}
              <IntelligenceDashboard data={intelligenceData} isLoading={isLoading} />
              {messages.length > 0 && (
                 <div className="pt-10 border-t border-zinc-900">
-                  <h3 className="text-xs font-bold text-zinc-600 uppercase tracking-widest mb-6 px-4">Knowledge Base (Previous Context)</h3>
-                  <div className="space-y-4 opacity-50 grayscale hover:grayscale-0 transition-all duration-500">
-                     {messages.slice(-2).map((m, i) => (
-                       <div key={i} className="p-4 bg-zinc-900/20 border border-zinc-800 rounded-2xl text-[11px]">
-                         <strong>Q:</strong> {m.query}
+                  <h3 className="text-xs font-bold text-zinc-600 uppercase tracking-widest mb-6 px-4">
+                    Historial de Consultas
+                  </h3>
+                  <div className="space-y-3 max-h-[360px] overflow-y-auto pr-2">
+                     {messages.slice(-8).reverse().map((m, i) => (
+                       <div key={i} className="p-4 bg-zinc-900/30 border border-zinc-800 rounded-2xl text-[12px] text-zinc-200">
+                         <p className="text-[10px] uppercase tracking-wider text-zinc-500 mb-1">
+                           {new Date(m.createdAt).toLocaleString()}
+                         </p>
+                         <p><strong>Q:</strong> {m.query}</p>
                        </div>
                      ))}
                   </div>
@@ -98,7 +126,9 @@ export default function Home() {
                   <div className="flex justify-start">
                     <div className="max-w-[85%] px-8 py-5 rounded-[2rem] bg-zinc-900/40 border border-zinc-800/50 text-zinc-100 shadow-sm backdrop-blur-md">
                       <p className="text-[15px] font-medium leading-relaxed tracking-tight">{msg.query}</p>
-                      <span className="text-[10px] text-zinc-600 font-black uppercase tracking-[0.2em] mt-4 block opacity-50">Query Registered</span>
+                      <span className="text-[10px] text-zinc-600 font-black uppercase tracking-[0.2em] mt-4 block opacity-50">
+                        {new Date(msg.createdAt).toLocaleTimeString()}
+                      </span>
                     </div>
                   </div>
 
