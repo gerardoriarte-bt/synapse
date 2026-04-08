@@ -1,0 +1,16 @@
+[Unit]
+Description=Synapse FastAPI (Snowflake)
+After=network.target
+
+[Service]
+Type=simple
+User=ubuntu
+Group=ubuntu
+WorkingDirectory=/home/ubuntu/Synapse/backend
+EnvironmentFile=-/home/ubuntu/Synapse/backend/.env
+ExecStart=/home/ubuntu/Synapse/backend/.venv/bin/uvicorn main:app --host 127.0.0.1 --port 8000
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
