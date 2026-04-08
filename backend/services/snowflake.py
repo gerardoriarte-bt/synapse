@@ -43,6 +43,14 @@ class SnowflakeService:
 
         self.conn = snowflake.connector.connect(**conn_params)
 
+        # Con PAT el warehouse del connect a veces no queda activo (57P03); forzar en sesión.
+        if token:
+            cur = self.conn.cursor()
+            try:
+                cur.execute(f"USE WAREHOUSE {warehouse}")
+            finally:
+                cur.close()
+
     # ------------------------------------------------------------------
     # DATOS DE PAUTA REAL (UA_ECOMM)
     # ------------------------------------------------------------------
