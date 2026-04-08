@@ -58,20 +58,6 @@ export const DynamicRenderer: React.FC<Props> = ({ data }) => {
               Freshness: {decision_meta.data_freshness}
             </span>
           </div>
-          {decision_meta.actions?.length > 0 && (
-            <div className="space-y-2">
-              <p className="text-xs font-bold uppercase tracking-wider text-zinc-400">Top Actions</p>
-              {decision_meta.actions.map((a, idx) => (
-                <div key={`${a.action}-${idx}`} className="rounded-lg border border-zinc-800 bg-zinc-900/40 p-3 text-sm text-zinc-200">
-                  <p className="font-semibold">{idx + 1}. {a.action}</p>
-                  <p className="mt-1 text-xs text-zinc-400">
-                    Owner: {a.owner} | Horizon: {a.horizon} | Priority: {a.priority_score}
-                  </p>
-                  <p className="mt-1 text-xs text-zinc-300">{a.expected_impact}</p>
-                </div>
-              ))}
-            </div>
-          )}
         </section>
       )}
 

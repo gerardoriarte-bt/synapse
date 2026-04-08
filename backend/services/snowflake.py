@@ -662,8 +662,14 @@ class SnowflakeService:
         if any(k in query.upper() for k in ["ROAS", "GENERAL", "TODAS", "RESUMEN", "ESTRATEG", "RENDIMIENTO", "TENDENCIA"]):
             platforms = ["GOOGLE", "FACEBOOK", "CRITEO"]
         elif not platforms:
-            # Para consultas no-performance (ej. productos/fuentes), no forzar ROAS.
-            return "", [], None
+            # Sin keywords de plataforma: no forzar ROAS por canal, pero sí traer evidencia Gold
+            # (ventas por fuente) para que el guardrail no bloquee consultas genéricas con data real.
+            sales = self._get_sales_data(cursor)
+            if sales:
+                context_parts.append("=== VENTAS POR FUENTE (Gold) ===")
+                context_parts.append(str(sales[:3]))
+                raw_data.extend(sales[:5])
+            return "\n\n".join(context_parts), raw_data, chart_config
 
         for platform in platforms:
             metrics = self._get_platform_metrics(cursor, platform)

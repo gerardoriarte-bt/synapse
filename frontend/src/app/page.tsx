@@ -137,7 +137,7 @@ export default function Home() {
                       <div className="w-8 h-8 rounded-xl bg-indigo-500/10 border border-indigo-400/20 flex items-center justify-center shadow-inner">
                         <Activity size={14} className="text-indigo-400" />
                       </div>
-                      <span className="text-[11px] font-black text-indigo-400/80 uppercase tracking-[0.25em]">Cortex Analyst Engine</span>
+                      <span className="text-[11px] font-black text-indigo-400/80 uppercase tracking-[0.25em]">Synapse Analyst</span>
                     </div>
                     <div className="pl-12 space-y-8 border-l-2 border-zinc-900/50 ml-4">
                       <DynamicRenderer data={msg.response} />
