@@ -120,58 +120,165 @@ class SnowflakeService:
         return f"stale_{lag_days}d"
 
     def _compute_comparisons(self, raw_data: List[Dict]) -> Dict[str, Any]:
-        """
-        Compara última semana vs semana previa para ROAS/GASTO/REVENUE cuando hay DATE.
-        """
+        # Deprecated: kept for compatibility. Real comparisons now use Gold layer queries.
+        return {
+            "week_over_week": {"status": "unavailable", "reason": "deprecated_local_mode"},
+            "vs_target": {"status": "unavailable", "reason": "deprecated_local_mode"},
+            "vs_last_year": {"status": "unavailable", "reason": "deprecated_local_mode"},
+        }
+
+    def _safe_div(self, a: float, b: float) -> Optional[float]:
+        if b in (0, 0.0, None):
+            return None
+        return round((a / b), 4)
+
+    def _delta_pct(self, current: Optional[float], previous: Optional[float]) -> Optional[float]:
+        if current is None or previous in (None, 0, 0.0):
+            return None
+        return round(((current - previous) / previous) * 100, 2)
+
+    def _get_window_from_data(self, cursor, raw_data: List[Dict]) -> Tuple[date, date]:
+        dates = [self._to_date(r.get("DATE")) for r in raw_data if "DATE" in r]
+        dates = sorted([d for d in dates if d is not None])
+        if dates:
+            end = dates[-1]
+            start = max(dates[0], end - timedelta(days=6))
+            return start, end
+
+        # fallback: usar última fecha disponible en Gold
+        try:
+            cursor.execute("""
+                SELECT MAX(DATE) AS MAX_DATE
+                FROM DB_BT_UA.BT_UA_MART_ANALYTICS.FCT_PERFORMANCE
+            """)
+            row = cursor.fetchone()
+            if row and row[0]:
+                end = self._to_date(row[0]) or datetime.utcnow().date()
+                return end - timedelta(days=6), end
+        except Exception:
+            pass
+
+        end = datetime.utcnow().date()
+        return end - timedelta(days=6), end
+
+    def _aggregate_performance_window(self, cursor, start: date, end: date) -> Dict[str, float]:
+        cursor.execute(f"""
+            SELECT
+                COALESCE(SUM(COST_USD), 0) AS GASTO,
+                COALESCE(SUM(INGRESOS_USD), 0) AS REVENUE,
+                COALESCE(SUM(ORDENES_VENDIDAS), 0) AS ORDENES,
+                COALESCE(SUM(UNIDADES_VENDIDAS), 0) AS UNIDADES
+            FROM DB_BT_UA.BT_UA_MART_ANALYTICS.FCT_PERFORMANCE
+            WHERE DATE BETWEEN '{start}' AND '{end}'
+        """)
+        row = cursor.fetchone() or (0, 0, 0, 0)
+        spend = float(row[0] or 0)
+        revenue = float(row[1] or 0)
+        orders = float(row[2] or 0)
+        units = float(row[3] or 0)
+        roas = self._safe_div(revenue, spend)
+        return {
+            "gasto": round(spend, 2),
+            "revenue": round(revenue, 2),
+            "ordenes": round(orders, 2),
+            "unidades": round(units, 2),
+            "roas": round(roas, 4) if roas is not None else None,
+        }
+
+    def _aggregate_target_window(self, cursor, start: date, end: date) -> Dict[str, float]:
+        cursor.execute(f"""
+            SELECT
+                COALESCE(SUM(TRY_TO_DECIMAL(REGEXP_REPLACE(DAILY_BUDGET_GROSS_TARGET, '[^0-9.-]', ''))), 0) AS GASTO_TARGET,
+                COALESCE(SUM(TRY_TO_DECIMAL(REGEXP_REPLACE(REVENUE_USD_TOTAL_TARGET, '[^0-9.-]', ''))), 0) AS REVENUE_TARGET,
+                COALESCE(SUM(TRY_TO_DECIMAL(REGEXP_REPLACE(ORDERS_TOTAL_TARGET, '[^0-9.-]', ''))), 0) AS ORDENES_TARGET,
+                COALESCE(SUM(TRY_TO_DECIMAL(REGEXP_REPLACE(UNITS_TOTAL_TARGET, '[^0-9.-]', ''))), 0) AS UNIDADES_TARGET
+            FROM UA_DATABASE.UA_ECOMM.UA_TARGETS_ECOMM
+            WHERE DATE BETWEEN '{start}' AND '{end}'
+        """)
+        row = cursor.fetchone() or (0, 0, 0, 0)
+        return {
+            "gasto_target": round(float(row[0] or 0), 2),
+            "revenue_target": round(float(row[1] or 0), 2),
+            "ordenes_target": round(float(row[2] or 0), 2),
+            "unidades_target": round(float(row[3] or 0), 2),
+        }
+
+    def _compute_gold_comparisons(self, cursor, raw_data: List[Dict]) -> Dict[str, Any]:
         output: Dict[str, Any] = {
             "week_over_week": {"status": "unavailable"},
             "vs_target": {"status": "unavailable"},
             "vs_last_year": {"status": "unavailable"},
         }
-        rows = []
-        for row in raw_data:
-            d = self._to_date(row.get("DATE"))
-            if not d:
-                continue
-            rows.append({
-                "DATE": d,
-                "ROAS": float(row.get("ROAS") or 0),
-                "GASTO": float(row.get("GASTO") or 0),
-                "REVENUE": float(row.get("REVENUE") or 0),
-            })
-        if not rows:
-            output["week_over_week"]["reason"] = "No hay columna DATE en la muestra."
+        try:
+            start, end = self._get_window_from_data(cursor, raw_data)
+            days = max(1, (end - start).days + 1)
+            prev_end = start - timedelta(days=1)
+            prev_start = prev_end - timedelta(days=days - 1)
+            ly_start = date(start.year - 1, start.month, start.day)
+            ly_end = date(end.year - 1, end.month, end.day)
+
+            current = self._aggregate_performance_window(cursor, start, end)
+            previous = self._aggregate_performance_window(cursor, prev_start, prev_end)
+            target = self._aggregate_target_window(cursor, start, end)
+            last_year = self._aggregate_performance_window(cursor, ly_start, ly_end)
+
+            wow_metrics = {}
+            for key in ["roas", "gasto", "revenue", "ordenes", "unidades"]:
+                wow_metrics[key] = {
+                    "current": current.get(key),
+                    "previous": previous.get(key),
+                    "delta_pct": self._delta_pct(current.get(key), previous.get(key)),
+                }
+            output["week_over_week"] = {
+                "status": "ok",
+                "window": {"current_start": str(start), "current_end": str(end)},
+                "metrics": wow_metrics,
+            }
+
+            target_metrics = {}
+            mapping = {
+                "gasto": "gasto_target",
+                "revenue": "revenue_target",
+                "ordenes": "ordenes_target",
+                "unidades": "unidades_target",
+            }
+            for actual_key, target_key in mapping.items():
+                actual = current.get(actual_key)
+                tgt = target.get(target_key)
+                target_metrics[actual_key] = {
+                    "actual": actual,
+                    "target": tgt,
+                    "gap_pct": self._delta_pct(actual, tgt),
+                }
+            output["vs_target"] = {
+                "status": "ok",
+                "window": {"start": str(start), "end": str(end)},
+                "metrics": target_metrics,
+            }
+
+            yoy_metrics = {}
+            for key in ["roas", "gasto", "revenue", "ordenes", "unidades"]:
+                yoy_metrics[key] = {
+                    "current": current.get(key),
+                    "last_year": last_year.get(key),
+                    "delta_pct": self._delta_pct(current.get(key), last_year.get(key)),
+                }
+            output["vs_last_year"] = {
+                "status": "ok",
+                "window": {
+                    "current_start": str(start),
+                    "current_end": str(end),
+                    "last_year_start": str(ly_start),
+                    "last_year_end": str(ly_end),
+                },
+                "metrics": yoy_metrics,
+            }
             return output
-
-        latest = max(r["DATE"] for r in rows)
-        wk_start = latest - timedelta(days=6)
-        prev_start = wk_start - timedelta(days=7)
-        prev_end = wk_start - timedelta(days=1)
-
-        current = [r for r in rows if wk_start <= r["DATE"] <= latest]
-        previous = [r for r in rows if prev_start <= r["DATE"] <= prev_end]
-        if not current or not previous:
-            output["week_over_week"]["reason"] = "Sin cobertura completa para semana actual y previa."
+        except Exception as e:
+            output["week_over_week"]["reason"] = f"error: {str(e)}"
+            output["vs_target"]["reason"] = f"error: {str(e)}"
+            output["vs_last_year"]["reason"] = f"error: {str(e)}"
             return output
-
-        def avg(metric: str, dataset: List[Dict]) -> float:
-            vals = [d[metric] for d in dataset]
-            return round(sum(vals) / len(vals), 2) if vals else 0.0
-
-        comp = {}
-        for m in ["ROAS", "GASTO", "REVENUE"]:
-            cur = avg(m, current)
-            prev = avg(m, previous)
-            delta_pct = round(((cur - prev) / prev) * 100, 2) if prev else None
-            comp[m.lower()] = {"current": cur, "previous": prev, "delta_pct": delta_pct}
-        output["week_over_week"] = {
-            "status": "ok",
-            "window": {"current_start": str(wk_start), "current_end": str(latest)},
-            "metrics": comp,
-        }
-        output["vs_target"]["reason"] = "No se calculó target gap en esta versión."
-        output["vs_last_year"]["reason"] = "No se calculó comparativo YoY en esta versión."
-        return output
 
     def _build_guardrails(self, raw_data: List[Dict], comparisons: Dict[str, Any]) -> List[str]:
         guardrails = []
@@ -209,6 +316,8 @@ class SnowflakeService:
         roas_delta = (wow_metrics.get("roas") or {}).get("delta_pct")
         spend_delta = (wow_metrics.get("gasto") or {}).get("delta_pct")
         revenue_delta = (wow_metrics.get("revenue") or {}).get("delta_pct")
+        target_metrics = ((comparisons.get("vs_target") or {}).get("metrics") or {})
+        revenue_target_gap = (target_metrics.get("revenue") or {}).get("gap_pct")
 
         if intent in {"budget_reallocation", "performance", "diagnostic"}:
             actions.append(
@@ -302,6 +411,10 @@ class SnowflakeService:
             actions[1].priority_score = round(min(0.99, actions[1].priority_score + 0.05), 2)
         if revenue_delta is not None and revenue_delta < 0:
             actions[2].priority_score = round(min(0.99, actions[2].priority_score + 0.05), 2)
+        if revenue_target_gap is not None and revenue_target_gap < -10:
+            # Si viene debajo de target, priorizar ejecución táctica en el corto plazo.
+            actions[0].priority_score = round(min(0.99, actions[0].priority_score + 0.07), 2)
+            actions[1].priority_score = round(min(0.99, actions[1].priority_score + 0.04), 2)
 
         return sorted(actions, key=lambda a: a.priority_score, reverse=True)[:3]
 
@@ -311,11 +424,25 @@ class SnowflakeService:
         roas = (wow_metrics.get("roas") or {}).get("delta_pct")
         spend = (wow_metrics.get("gasto") or {}).get("delta_pct")
         revenue = (wow_metrics.get("revenue") or {}).get("delta_pct")
+        target_metrics = ((comparisons.get("vs_target") or {}).get("metrics") or {})
+        yoy_metrics = ((comparisons.get("vs_last_year") or {}).get("metrics") or {})
+        rev_target_gap = (target_metrics.get("revenue") or {}).get("gap_pct")
+        rev_yoy = (yoy_metrics.get("revenue") or {}).get("delta_pct")
         comps_txt = (
             f"ROAS vs semana previa: {roas}% | "
             f"Gasto: {spend}% | Revenue: {revenue}%"
             if (comparisons.get("week_over_week") or {}).get("status") == "ok"
             else "Comparativo semanal no disponible con la data actual."
+        )
+        target_txt = (
+            f"Revenue vs target: {rev_target_gap}%"
+            if (comparisons.get("vs_target") or {}).get("status") == "ok"
+            else "Comparativo vs target no disponible."
+        )
+        yoy_txt = (
+            f"Revenue vs LY: {rev_yoy}%"
+            if (comparisons.get("vs_last_year") or {}).get("status") == "ok"
+            else "Comparativo vs last year no disponible."
         )
         risks_txt = " | ".join(decision_meta.guardrails) if decision_meta.guardrails else "Sin riesgos críticos detectados."
 
@@ -331,7 +458,9 @@ class SnowflakeService:
             f"- Intento detectado: {decision_meta.intent}\n"
             f"- Freshness: {decision_meta.data_freshness}\n"
             f"- Confianza: {decision_meta.confidence_score}\n"
-            f"- {comps_txt}\n\n"
+            f"- {comps_txt}\n"
+            f"- {target_txt}\n"
+            f"- {yoy_txt}\n\n"
             "Causa raíz probable:\n"
             "- Variabilidad de eficiencia por canal/campaña y/o cobertura de datos parcial.\n\n"
             "Acciones concretas priorizadas:\n"
@@ -635,7 +764,7 @@ class SnowflakeService:
             render_type = "chart" if chart_config else ("table" if raw_data else "text")
 
             freshness = self._get_data_freshness(raw_data)
-            comparisons = self._compute_comparisons(raw_data)
+            comparisons = self._compute_gold_comparisons(cursor, raw_data)
             guardrails = self._build_guardrails(raw_data, comparisons)
             confidence = self._compute_confidence(raw_data, freshness, guardrails)
             actions = self._build_recommended_actions(intent, comparisons, confidence)
