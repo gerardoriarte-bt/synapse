@@ -123,6 +123,11 @@ class SnowflakeService:
         """
         Compara última semana vs semana previa para ROAS/GASTO/REVENUE cuando hay DATE.
         """
+        output: Dict[str, Any] = {
+            "week_over_week": {"status": "unavailable"},
+            "vs_target": {"status": "unavailable"},
+            "vs_last_year": {"status": "unavailable"},
+        }
         rows = []
         for row in raw_data:
             d = self._to_date(row.get("DATE"))
@@ -135,7 +140,8 @@ class SnowflakeService:
                 "REVENUE": float(row.get("REVENUE") or 0),
             })
         if not rows:
-            return {}
+            output["week_over_week"]["reason"] = "No hay columna DATE en la muestra."
+            return output
 
         latest = max(r["DATE"] for r in rows)
         wk_start = latest - timedelta(days=6)
@@ -145,7 +151,8 @@ class SnowflakeService:
         current = [r for r in rows if wk_start <= r["DATE"] <= latest]
         previous = [r for r in rows if prev_start <= r["DATE"] <= prev_end]
         if not current or not previous:
-            return {}
+            output["week_over_week"]["reason"] = "Sin cobertura completa para semana actual y previa."
+            return output
 
         def avg(metric: str, dataset: List[Dict]) -> float:
             vals = [d[metric] for d in dataset]
@@ -157,13 +164,21 @@ class SnowflakeService:
             prev = avg(m, previous)
             delta_pct = round(((cur - prev) / prev) * 100, 2) if prev else None
             comp[m.lower()] = {"current": cur, "previous": prev, "delta_pct": delta_pct}
-        return comp
+        output["week_over_week"] = {
+            "status": "ok",
+            "window": {"current_start": str(wk_start), "current_end": str(latest)},
+            "metrics": comp,
+        }
+        output["vs_target"]["reason"] = "No se calculó target gap en esta versión."
+        output["vs_last_year"]["reason"] = "No se calculó comparativo YoY en esta versión."
+        return output
 
     def _build_guardrails(self, raw_data: List[Dict], comparisons: Dict[str, Any]) -> List[str]:
         guardrails = []
         if len(raw_data) < 5:
             guardrails.append("Muestra baja (<5 registros): validar antes de escalar inversión.")
-        if not comparisons:
+        week = comparisons.get("week_over_week") or {}
+        if week.get("status") != "ok":
             guardrails.append("Comparativo semanal incompleto: faltan datos para vs semana previa.")
         zero_cost = sum(1 for r in raw_data if float(r.get("GASTO") or 0) == 0)
         if zero_cost > 0:
@@ -190,9 +205,10 @@ class SnowflakeService:
         confidence: float,
     ) -> List[RecommendedAction]:
         actions: List[RecommendedAction] = []
-        roas_delta = (comparisons.get("roas") or {}).get("delta_pct")
-        spend_delta = (comparisons.get("gasto") or {}).get("delta_pct")
-        revenue_delta = (comparisons.get("revenue") or {}).get("delta_pct")
+        wow_metrics = ((comparisons.get("week_over_week") or {}).get("metrics") or {})
+        roas_delta = (wow_metrics.get("roas") or {}).get("delta_pct")
+        spend_delta = (wow_metrics.get("gasto") or {}).get("delta_pct")
+        revenue_delta = (wow_metrics.get("revenue") or {}).get("delta_pct")
 
         if intent in {"budget_reallocation", "performance", "diagnostic"}:
             actions.append(
@@ -291,13 +307,15 @@ class SnowflakeService:
 
     def _render_required_sections(self, decision_meta: DecisionMeta) -> str:
         comparisons = decision_meta.comparisons
-        roas = (comparisons.get("roas") or {}).get("delta_pct")
-        spend = (comparisons.get("gasto") or {}).get("delta_pct")
-        revenue = (comparisons.get("revenue") or {}).get("delta_pct")
+        wow_metrics = ((comparisons.get("week_over_week") or {}).get("metrics") or {})
+        roas = (wow_metrics.get("roas") or {}).get("delta_pct")
+        spend = (wow_metrics.get("gasto") or {}).get("delta_pct")
+        revenue = (wow_metrics.get("revenue") or {}).get("delta_pct")
         comps_txt = (
             f"ROAS vs semana previa: {roas}% | "
             f"Gasto: {spend}% | Revenue: {revenue}%"
-            if comparisons else "Comparativo semanal no disponible con la data actual."
+            if (comparisons.get("week_over_week") or {}).get("status") == "ok"
+            else "Comparativo semanal no disponible con la data actual."
         )
         risks_txt = " | ".join(decision_meta.guardrails) if decision_meta.guardrails else "Sin riesgos críticos detectados."
 
