@@ -109,7 +109,7 @@ export default function Home() {
                 <div className="space-y-3">
                   <h1 className="text-5xl font-black tracking-tighter text-white">Advanced Analytics</h1>
                   <p className="text-zinc-500 max-w-sm mx-auto font-medium leading-relaxed">
-                    Consult your business data in real-time using Snowflake Cortex AI intelligence.
+                    Consulta tus datos de negocio en tiempo real con análisis asistido por Synapse.
                   </p>
                 </div>
                 <div className="flex flex-wrap justify-center gap-3 max-w-xl">

@@ -3,7 +3,7 @@ import os
 import uuid
 from datetime import date, datetime, timedelta
 from typing import Optional, Union, List, Tuple, Dict, Any
-from models.synapse import SynapseResponse, ChartConfig, DecisionMeta, RecommendedAction
+from models.synapse import SynapseResponse, ChartConfig, DecisionMeta
 from services.snowflake_catalog import (
     HEAVY_TABLES_SAMPLE_SQL,
     is_allowed_identifier,
@@ -350,173 +350,6 @@ class SnowflakeService:
         score -= penalty
         return round(max(0.1, min(0.95, score)), 2)
 
-    def _build_recommended_actions(
-        self,
-        intent: str,
-        comparisons: Dict[str, Any],
-        confidence: float,
-    ) -> List[RecommendedAction]:
-        actions: List[RecommendedAction] = []
-        wow_metrics = ((comparisons.get("week_over_week") or {}).get("metrics") or {})
-        roas_delta = (wow_metrics.get("roas") or {}).get("delta_pct")
-        spend_delta = (wow_metrics.get("gasto") or {}).get("delta_pct")
-        revenue_delta = (wow_metrics.get("revenue") or {}).get("delta_pct")
-        target_metrics = ((comparisons.get("vs_target") or {}).get("metrics") or {})
-        revenue_target_gap = (target_metrics.get("revenue") or {}).get("gap_pct")
-
-        if intent in {"budget_reallocation", "performance", "diagnostic"}:
-            actions.append(
-                RecommendedAction(
-                    action="Reasignar 10-15% del presupuesto desde campañas con ROAS bajo al top cuartil de ROAS.",
-                    owner="medios",
-                    horizon="24h",
-                    expected_impact="Mejora esperada de 3-8% en ROAS semanal.",
-                    priority_score=round(0.85 * confidence, 2),
-                )
-            )
-            actions.append(
-                RecommendedAction(
-                    action="Configurar alerta diaria de desvío de gasto y ROAS por campaña (umbral +/-20%).",
-                    owner="planning",
-                    horizon="7d",
-                    expected_impact="Reduce sobreinversión y acelera correcciones tácticas.",
-                    priority_score=round(0.78 * confidence, 2),
-                )
-            )
-            actions.append(
-                RecommendedAction(
-                    action="Ejecutar experimento A/B de segmentación/creatividad en canal con caída relativa.",
-                    owner="estrategia",
-                    horizon="30d",
-                    expected_impact="Incremento potencial de 5-12% en revenue incremental.",
-                    priority_score=round(0.7 * confidence, 2),
-                )
-            )
-        elif intent == "forecast":
-            actions.append(
-                RecommendedAction(
-                    action="Construir forecast semanal de ROAS/Revenue con baseline de últimas 8 semanas.",
-                    owner="planning",
-                    horizon="7d",
-                    expected_impact="Mayor precisión para pacing y cierre de mes.",
-                    priority_score=round(0.8 * confidence, 2),
-                )
-            )
-            actions.append(
-                RecommendedAction(
-                    action="Definir bandas de acción automática (congelar/escalar) según desviación del forecast.",
-                    owner="medios",
-                    horizon="24h",
-                    expected_impact="Menor volatilidad y respuesta táctica más rápida.",
-                    priority_score=round(0.74 * confidence, 2),
-                )
-            )
-            actions.append(
-                RecommendedAction(
-                    action="Revisar supuestos de estacionalidad y eventos comerciales con negocio.",
-                    owner="estrategia",
-                    horizon="30d",
-                    expected_impact="Menor error de pronóstico en picos promocionales.",
-                    priority_score=round(0.66 * confidence, 2),
-                )
-            )
-        else:
-            actions.append(
-                RecommendedAction(
-                    action="Consolidar KPIs por canal/campaña en tablero semanal con owner definido.",
-                    owner="planning",
-                    horizon="7d",
-                    expected_impact="Mejor gobernanza y consistencia de decisiones.",
-                    priority_score=round(0.72 * confidence, 2),
-                )
-            )
-            actions.append(
-                RecommendedAction(
-                    action="Priorizar 3 oportunidades de mayor impacto y ejecutar test controlados.",
-                    owner="estrategia",
-                    horizon="30d",
-                    expected_impact="Aprendizaje continuo y lift incremental sostenido.",
-                    priority_score=round(0.68 * confidence, 2),
-                )
-            )
-            actions.append(
-                RecommendedAction(
-                    action="Alinear pauta diaria con objetivo semanal de revenue y eficiencia.",
-                    owner="medios",
-                    horizon="24h",
-                    expected_impact="Mejor pacing y menor desvío al cierre semanal.",
-                    priority_score=round(0.7 * confidence, 2),
-                )
-            )
-
-        # Ajuste contextual simple por deltas observados.
-        if roas_delta is not None and roas_delta < -10:
-            actions[0].priority_score = round(min(0.99, actions[0].priority_score + 0.08), 2)
-        if spend_delta is not None and spend_delta > 20:
-            actions[1].priority_score = round(min(0.99, actions[1].priority_score + 0.05), 2)
-        if revenue_delta is not None and revenue_delta < 0:
-            actions[2].priority_score = round(min(0.99, actions[2].priority_score + 0.05), 2)
-        if revenue_target_gap is not None and revenue_target_gap < -10:
-            # Si viene debajo de target, priorizar ejecución táctica en el corto plazo.
-            actions[0].priority_score = round(min(0.99, actions[0].priority_score + 0.07), 2)
-            actions[1].priority_score = round(min(0.99, actions[1].priority_score + 0.04), 2)
-
-        return sorted(actions, key=lambda a: a.priority_score, reverse=True)[:3]
-
-    def _render_required_sections(self, decision_meta: DecisionMeta) -> str:
-        comparisons = decision_meta.comparisons
-        wow_metrics = ((comparisons.get("week_over_week") or {}).get("metrics") or {})
-        roas = (wow_metrics.get("roas") or {}).get("delta_pct")
-        spend = (wow_metrics.get("gasto") or {}).get("delta_pct")
-        revenue = (wow_metrics.get("revenue") or {}).get("delta_pct")
-        target_metrics = ((comparisons.get("vs_target") or {}).get("metrics") or {})
-        yoy_metrics = ((comparisons.get("vs_last_year") or {}).get("metrics") or {})
-        rev_target_gap = (target_metrics.get("revenue") or {}).get("gap_pct")
-        rev_yoy = (yoy_metrics.get("revenue") or {}).get("delta_pct")
-        comps_txt = (
-            f"ROAS vs semana previa: {roas}% | "
-            f"Gasto: {spend}% | Revenue: {revenue}%"
-            if (comparisons.get("week_over_week") or {}).get("status") == "ok"
-            else "Comparativo semanal no disponible con la data actual."
-        )
-        target_txt = (
-            f"Revenue vs target: {rev_target_gap}%"
-            if (comparisons.get("vs_target") or {}).get("status") == "ok"
-            else "Comparativo vs target no disponible."
-        )
-        yoy_txt = (
-            f"Revenue vs LY: {rev_yoy}%"
-            if (comparisons.get("vs_last_year") or {}).get("status") == "ok"
-            else "Comparativo vs last year no disponible."
-        )
-        risks_txt = " | ".join(decision_meta.guardrails) if decision_meta.guardrails else "Sin riesgos críticos detectados."
-
-        actions_lines = []
-        for idx, a in enumerate(decision_meta.actions, start=1):
-            actions_lines.append(
-                f"{idx}) [{a.owner} - {a.horizon}] {a.action} "
-                f"(Impacto: {a.expected_impact}; Prioridad: {a.priority_score})"
-            )
-
-        return (
-            "Situación actual:\n"
-            f"- Intento detectado: {decision_meta.intent}\n"
-            f"- Freshness: {decision_meta.data_freshness}\n"
-            f"- Confianza: {decision_meta.confidence_score}\n"
-            f"- {comps_txt}\n"
-            f"- {target_txt}\n"
-            f"- {yoy_txt}\n\n"
-            "Causa raíz probable:\n"
-            "- Variabilidad de eficiencia por canal/campaña y/o cobertura de datos parcial.\n\n"
-            "Acciones concretas priorizadas:\n"
-            + "\n".join(actions_lines)
-            + "\n\n"
-            "Impacto estimado:\n"
-            "- Ejecución disciplinada de las 3 acciones debería mejorar eficiencia y control de pacing semanal.\n\n"
-            "Riesgos y guardrails:\n"
-            f"- {risks_txt}"
-        )
-
     def _get_top_products_by_source(self, cursor, limit: int = 5) -> Tuple[List[Dict], Optional[ChartConfig]]:
         """
         Usa capa Gold para top productos por fuente.
@@ -756,22 +589,22 @@ class SnowflakeService:
 
     def _build_no_data_response(self, query: str, intent: str) -> SynapseResponse:
         narrative = (
-            "No tengo capacidad para responder esta consulta con la data disponible en la capa Gold autorizada. "
-            "Reformula la pregunta usando dimensiones y métricas existentes en Gold "
-            "(por ejemplo: ROAS, gasto, revenue, órdenes, unidades, fuente, campaña, producto)."
+            "Con la evidencia operativa disponible hoy no puedo sustentar una respuesta fiable a esta pregunta. "
+            "Te sugiero acotar por periodo, canal o tipo de métrica (por ejemplo: ROAS, gasto, ingresos, órdenes, "
+            "campaña o producto) para que el análisis sea accionable."
         )
         decision_meta = DecisionMeta(
             intent=intent,
             confidence_score=0.0,
             data_freshness="unknown",
             guardrails=[
-                "Guardrail estricto activo: solo se permiten respuestas sustentadas por tablas Gold.",
-                f"Consulta sin evidencia suficiente en Gold: '{query[:120]}'",
+                "Respuesta restringida a evidencia cuantitativa disponible para el equipo.",
+                f"Consulta sin muestra suficiente: '{query[:120]}'",
             ],
             comparisons={
-                "week_over_week": {"status": "unavailable", "reason": "Sin datos Gold para esta consulta."},
-                "vs_target": {"status": "unavailable", "reason": "Sin datos Gold para esta consulta."},
-                "vs_last_year": {"status": "unavailable", "reason": "Sin datos Gold para esta consulta."},
+                "week_over_week": {"status": "unavailable", "reason": "Sin muestra comparable para esta consulta."},
+                "vs_target": {"status": "unavailable", "reason": "Sin muestra comparable para esta consulta."},
+                "vs_last_year": {"status": "unavailable", "reason": "Sin muestra comparable para esta consulta."},
             },
             actions=[],
         )
@@ -901,14 +734,13 @@ class SnowflakeService:
             comparisons = self._compute_gold_comparisons(cursor, raw_data)
             guardrails = self._build_guardrails(raw_data, comparisons)
             confidence = self._compute_confidence(raw_data, freshness, guardrails)
-            actions = self._build_recommended_actions(intent, comparisons, confidence)
             decision_meta = DecisionMeta(
                 intent=intent,
                 confidence_score=confidence,
                 data_freshness=freshness,
                 guardrails=guardrails,
                 comparisons=comparisons,
-                actions=actions,
+                actions=[],
             )
 
             # 2. Contexto RAG de reportes y fórmulas
@@ -919,42 +751,40 @@ class SnowflakeService:
                 [f"Usuario: {h['q']}\nSynapse: {h['a']}" for h in history]
             ) if history else ""
 
-            # 4. Prompt para Cortex
-            prompt = f"""Eres Synapse, Analista de Marketing Senior de la agencia Buentipo.
-Tienes acceso exclusivamente a tablas/vistas de la capa Gold en Snowflake (catálogo completo UA: performance, brand, atribución, ecommerce, social, DQ, markup, etc.).
-Cada fila puede incluir el campo _source_dataset indicando el origen (tabla/vista).
-Responde de forma ejecutiva, directa y orientada a la acción estratégica.
+            # 4. Prompt al modelo (salida = narrativa que se entrega tal cual al cliente)
+            prompt = f"""Eres Synapse, consejero analista senior en medios y ecommerce para Under Armour México (agencia Buentipo).
+
+Dispones de evidencia cuantitativa y definiciones en bloques marcados abajo (uso interno). Las filas pueden traer el campo _source_dataset solo como referencia interna: si lo usas, tradúcelo a lenguaje de negocio (p. ej. "resumen de medios pagados", "detalle por campaña") sin mencionar proveedores de datos, nombres de bases, almacenes ni motores de IA.
+
+Tono: como director de insights ante el cliente —claro, directo, con juicio y recomendaciones accionables. Sin saludos largos ni relleno.
 
 {f"HISTORIAL:{chr(10)}{history_context}{chr(10)}" if history_context else ""}
-{f"DATOS REALES CAPA GOLD (Snowflake DB_BT_UA.BT_UA_MART_ANALYTICS):{chr(10)}{ads_context}{chr(10)}" if ads_context else ""}
-{f"CONTEXTO Y FÓRMULAS (Snowflake DB_BT_UA):{chr(10)}{rag_context}{chr(10)}" if rag_context else ""}
-PREGUNTA: {query}
+{f"EVIDENCIA CUANTITATIVA (UA México):{chr(10)}{ads_context}{chr(10)}" if ads_context else ""}
+{f"DEFINICIONES Y TEXTO DE APOYO:{chr(10)}{rag_context}{chr(10)}" if rag_context else ""}
+PREGUNTA DEL CLIENTE: {query}
 
-INSTRUCCIONES:
-- Usa cifras concretas de los datos cuando estén disponibles; cita el dataset (_source_dataset) cuando compares fuentes.
-- Incluye comparativo obligatorio vs semana previa cuando exista data.
-- Cita riesgos/guardrails cuando la muestra o calidad de datos sea limitada.
-- Formato obligatorio:
-  1) Situación actual
-  2) Causa raíz probable
-  3) Acciones concretas priorizadas (exactamente 3)
-     - Cada acción debe incluir: owner (medios/planning/estrategia), ventana (24h/7d/30d), impacto estimado.
-  4) Impacto estimado
-  5) Riesgos y guardrails
-- Respuesta concisa, sin saludos."""
+Instrucciones:
+- Basa conclusiones en cifras presentes en la evidencia; no inventes métricas.
+- Si la muestra es delgada o incompleta, dilo como riesgo para la decisión (no como fallo técnico).
+- Incluye comparativos (vs periodo previo, vs meta, vs año anterior) solo cuando la evidencia lo permita; si no, dilo explícitamente.
+- Estructura libre con titulares claros (puedes usar ##) y viñetas; prioriza "qué implica" y "qué haría el equipo".
+
+Responde únicamente con el análisis para el cliente (sin metacomentarios sobre el prompt)."""
 
             prompt_safe = prompt.replace("$$", "__DD__")
+            # COMPLETE devuelve la respuesta completa en un round-trip; streaming al cliente
+            # requeriría SNOWFLAKE.CORTEX.COMPLETE ... con streaming en SQL API o orquestación aparte.
             cursor.execute(
                 f"SELECT SNOWFLAKE.CORTEX.COMPLETE('mistral-large2', $${prompt_safe}$$)"
             )
             row = cursor.fetchone()
-            narrative = row[0].replace("__DD__", "$$") if row else "No se pudo generar respuesta."
-
-            required_markers = [
-                "Situación", "Causa", "Acciones", "Impacto", "Riesgo"
-            ]
-            if not all(marker.lower() in narrative.lower() for marker in required_markers):
-                narrative = f"{narrative}\n\n{self._render_required_sections(decision_meta)}"
+            narrative = (row[0].replace("__DD__", "$$") if row else "") or ""
+            narrative = narrative.strip()
+            if not narrative:
+                narrative = (
+                    "No pude generar el análisis en este momento. "
+                    "Intenta reformular la pregunta o acotar periodo y canal."
+                )
 
             return SynapseResponse(
                 response_id=str(uuid.uuid4()),

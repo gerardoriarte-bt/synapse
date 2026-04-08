@@ -12,7 +12,7 @@ import json
 
 load_dotenv()
 
-app = FastAPI(title="Synapse API - Snowflake + Postgres")
+app = FastAPI(title="Synapse API")
 
 # CORS
 app.add_middleware(
@@ -119,7 +119,7 @@ async def ask_synapse(request: QueryRequest, db: Session = Depends(get_db)):
 
         history = [{"q": c.query, "a": c.narrative} for c in reversed(past_interactions)]
 
-        # 2. Procesar con Snowflake + Cortex
+        # 2. Procesar consulta (datos + narrativa del modelo)
         agent = SnowflakeService(tenant_id=request.tenant_id)
         
         target_query = request.query

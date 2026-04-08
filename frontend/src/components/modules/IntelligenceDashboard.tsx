@@ -24,7 +24,7 @@ export const IntelligenceDashboard: React.FC<Props> = ({ data, isLoading }) => {
         <BarChart3 className="text-zinc-600" size={32} />
       </div>
       <h2 className="text-xl font-bold text-white">No Intelligence Assets Found</h2>
-      <p className="text-zinc-500 max-w-sm font-medium italic">Click &quot;Generate Insights&quot; to build your strategic marketing pulse from Snowflake.</p>
+      <p className="text-zinc-500 max-w-sm font-medium italic">Pulsa &quot;Generate Insights&quot; para generar el pulso estratégico de marketing con Synapse.</p>
     </div>
   );
 
@@ -33,7 +33,7 @@ export const IntelligenceDashboard: React.FC<Props> = ({ data, isLoading }) => {
       <div className="flex justify-between items-end">
         <div>
           <h2 className="text-3xl font-black tracking-tighter text-white uppercase italic">Strategic Insight Engine</h2>
-          <p className="text-zinc-500 font-bold text-xs uppercase tracking-[0.2em] mt-1">Advanced Marketing Intelligence / Snowflake Cortex</p>
+          <p className="text-zinc-500 font-bold text-xs uppercase tracking-[0.2em] mt-1">Marketing Intelligence · Synapse Analyst</p>
         </div>
         <div className="text-[10px] px-6 py-2 bg-indigo-500/10 border border-indigo-400/20 text-indigo-400 font-black rounded-full uppercase tracking-[0.3em] shadow-lg shadow-indigo-500/5">
           Real-Time Analysis Enabled
@@ -52,7 +52,7 @@ export const IntelligenceDashboard: React.FC<Props> = ({ data, isLoading }) => {
              <h3 className="text-[10px] font-black text-amber-500/80 uppercase tracking-widest">The Strategic Tension</h3>
           </div>
           <p className="text-sm font-bold text-zinc-300 leading-relaxed italic">
-            &quot;Dynamic ROAS volatility detected in your latest Snowflake data cycles. This warrants immediate executive attention.&quot;
+            &quot;La volatilidad reciente en ROAS merece una lectura ejecutiva: revisa pacing por canal y alinea con el objetivo semanal.&quot;
           </p>
         </div>
 
@@ -79,7 +79,7 @@ export const IntelligenceDashboard: React.FC<Props> = ({ data, isLoading }) => {
             <Lightbulb size={28} />
           </div>
           <div>
-            <h3 className="text-[10px] font-black text-indigo-400 uppercase tracking-[0.4em]">Cortex AI Recommendation</h3>
+            <h3 className="text-[10px] font-black text-indigo-400 uppercase tracking-[0.4em]">Recomendación del analista</h3>
             <p className="text-xl font-black text-white tracking-tighter uppercase italic">Executive Action Plan</p>
           </div>
         </div>
