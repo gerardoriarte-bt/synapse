@@ -24,21 +24,23 @@ class SnowflakeService:
             "database": os.getenv('SNOWFLAKE_DATABASE', RAG_DB),
             "warehouse": warehouse,
             "schema": schema,
-            "role": role,
             "client_prefetch_mfa_token": False,
-            "client_request_mfa_token": False
+            "client_request_mfa_token": False,
         }
 
         if token:
+            # PAT a veces rechaza `role` en el connect string aunque el rol esté concedido;
+            # conectamos sin role y activamos con USE ROLE en sesión.
             print(f"[Snowflake] Connecting via Token (User: {user}, Account: {account})")
             conn_params["authenticator"] = "PROGRAMMATIC_ACCESS_TOKEN"
             conn_params["token"] = token
         else:
             print("[Snowflake] Connecting via Password")
             conn_params["password"] = os.getenv('SNOWFLAKE_PASSWORD')
+            conn_params["role"] = role
 
         self.conn = snowflake.connector.connect(**conn_params)
-        # Asegura warehouse activo en sesión (evita 57P03 con roles de servicio)
+        # Rol y warehouse en sesión (necesario con PAT y para evitar 57P03)
         cur = self.conn.cursor()
         try:
             cur.execute(f"USE ROLE {role}")
