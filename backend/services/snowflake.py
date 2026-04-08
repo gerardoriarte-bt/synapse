@@ -54,6 +54,66 @@ class SnowflakeService:
         q = query.upper()
         return any(term in q for term in chart_terms)
 
+    def _wants_top_products(self, query: str) -> bool:
+        q = query.upper()
+        product_terms = ["PRODUCTO", "PRODUCTOS", "PRODUCT", "ITEM", "SKU"]
+        top_terms = ["TOP", "MÁS", "MAS", "VEND", "SELL", "RANK", "RANKING"]
+        source_terms = ["FUENTE", "FUENTES", "SOURCE", "CANAL", "ORIGEN"]
+        return any(t in q for t in product_terms) and any(t in q for t in top_terms + source_terms)
+
+    def _extract_top_n(self, query: str, default: int = 5) -> int:
+        import re
+
+        q = query.upper()
+        digit_match = re.search(r"\b(\d{1,2})\b", q)
+        if digit_match:
+            n = int(digit_match.group(1))
+            return max(1, min(n, 20))
+
+        words_to_num = {
+            "UNO": 1, "DOS": 2, "TRES": 3, "CUATRO": 4, "CINCO": 5,
+            "SEIS": 6, "SIETE": 7, "OCHO": 8, "NUEVE": 9, "DIEZ": 10
+        }
+        for word, num in words_to_num.items():
+            if word in q:
+                return num
+        return default
+
+    def _get_top_products_by_source(self, cursor, limit: int = 5) -> Tuple[List[Dict], Optional[ChartConfig]]:
+        """
+        Usa ADOBE_SESSION para aproximar 'productos' por TRACKING_CODE, con fuente en DATA_SOURCE_NAME.
+        """
+        try:
+            cursor.execute(f"""
+                SELECT
+                    TRACKING_CODE                              AS PRODUCTO,
+                    DATA_SOURCE_NAME                           AS FUENTE,
+                    SUM(ORDERS)                                AS ORDENES,
+                    SUM(UNITS)                                 AS UNIDADES,
+                    SUM(REVENUE)                               AS REVENUE
+                FROM {self.ads_db}.{self.ads_schema}.ADOBE_SESSION
+                WHERE TRACKING_CODE IS NOT NULL
+                GROUP BY TRACKING_CODE, DATA_SOURCE_NAME
+                ORDER BY SUM(UNITS) DESC
+                LIMIT {limit}
+            """)
+            rows = cursor.fetchall()
+            cols = [d[0] for d in cursor.description]
+            data = [dict(zip(cols, r)) for r in rows] if rows else []
+            if not data:
+                return [], None
+
+            chart = ChartConfig(
+                type="bar",
+                x_axis=[row["PRODUCTO"] for row in data],
+                y_axis=[float(row.get("UNIDADES") or 0) for row in data],
+                metrics_label="UNIDADES"
+            )
+            return data, chart
+        except Exception as e:
+            print(f"TOP PRODUCTOS warning: {e}")
+            return [], None
+
     def _build_fallback_chart(self, raw_data: List[Dict]) -> Optional[ChartConfig]:
         if not raw_data:
             return None
@@ -193,9 +253,12 @@ class SnowflakeService:
         if any(k in query.upper() for k in ["CRITEO", "RETARGETING", "DISPLAY"]):
             platforms.append("CRITEO")
 
-        # Si no se detecta plataforma o pregunta por ROAS general, traer todas
-        if not platforms or any(k in query.upper() for k in ["ROAS", "GENERAL", "TODAS", "RESUMEN", "ESTRATEG"]):
+        # Traer todas solo si la consulta apunta a performance/ROAS.
+        if any(k in query.upper() for k in ["ROAS", "GENERAL", "TODAS", "RESUMEN", "ESTRATEG", "RENDIMIENTO", "TENDENCIA"]):
             platforms = ["GOOGLE", "FACEBOOK", "CRITEO"]
+        elif not platforms:
+            # Para consultas no-performance (ej. productos/fuentes), no forzar ROAS.
+            return "", [], None
 
         for platform in platforms:
             metrics = self._get_platform_metrics(cursor, platform)
@@ -290,8 +353,16 @@ class SnowflakeService:
     def process_query(self, query: str, history: List = []) -> SynapseResponse:
         cursor = self.conn.cursor()
         try:
-            # 1. Datos reales de pauta (UA_ECOMM)
-            ads_context, raw_data, chart_config = self._build_ads_context(cursor, query)
+            # 1. Datos reales según intención de consulta
+            if self._wants_top_products(query):
+                top_n = self._extract_top_n(query, default=5)
+                raw_data, chart_config = self._get_top_products_by_source(cursor, limit=top_n)
+                ads_context = ""
+                if raw_data:
+                    ads_context = "=== TOP PRODUCTOS (TRACKING_CODE) Y FUENTE ===\n" + str(raw_data[:5])
+            else:
+                ads_context, raw_data, chart_config = self._build_ads_context(cursor, query)
+
             if not chart_config and self._wants_chart(query):
                 chart_config = self._build_fallback_chart(raw_data)
 
