@@ -8,6 +8,7 @@ from database.models import Conversation, init_db
 from dotenv import load_dotenv
 import uuid
 import os
+import json
 
 load_dotenv()
 
@@ -31,6 +32,13 @@ class QueryRequest(BaseModel):
     query: str
     tenant_id: str
     user_id: str = "default_user"
+
+
+def to_json_compatible(value):
+    """Convierte objetos no serializables (date/datetime/Decimal) a JSON seguro."""
+    if value is None:
+        return None
+    return json.loads(json.dumps(value, default=str))
 
 @app.get("/")
 async def health_check():
@@ -128,8 +136,8 @@ async def ask_synapse(request: QueryRequest, db: Session = Depends(get_db)):
             query=request.query,
             narrative=response.narrative,
             render_type=response.render_type,
-            chart_config=response.chart_config.dict() if response.chart_config else None,
-            raw_data=response.raw_data,
+            chart_config=to_json_compatible(response.chart_config.dict()) if response.chart_config else None,
+            raw_data=to_json_compatible(response.raw_data),
         )
         db.add(new_conv)
         db.commit()
