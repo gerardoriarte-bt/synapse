@@ -30,6 +30,10 @@ class SnowflakeService:
         }
 
         if token:
+            # PAT (Programmatic Access Token): no enviar `role` en el connect string.
+            # Aunque el usuario tenga GRANT USAGE ON ROLE, el conector puede rechazarlo;
+            # la sesión usa el DEFAULT_ROLE del usuario (debe ser SYNAPSE_APP_ROLE).
+            conn_params.pop("role", None)
             print(f"[Snowflake] Connecting via Token (User: {user}, Account: {account})")
             conn_params["authenticator"] = "PROGRAMMATIC_ACCESS_TOKEN"
             conn_params["token"] = token
@@ -38,7 +42,6 @@ class SnowflakeService:
             conn_params["password"] = os.getenv('SNOWFLAKE_PASSWORD')
 
         self.conn = snowflake.connector.connect(**conn_params)
-        # PAT: sesión restringida; no ejecutar USE ROLE / USE WAREHOUSE aquí (ya van en connect).
 
     # ------------------------------------------------------------------
     # DATOS DE PAUTA REAL (UA_ECOMM)
