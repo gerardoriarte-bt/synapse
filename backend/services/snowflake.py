@@ -14,14 +14,17 @@ class SnowflakeService:
         token = os.getenv('SNOWFLAKE_TOKEN', '').strip()
         user = os.getenv('SNOWFLAKE_USER', '').strip().upper()
         account = os.getenv('SNOWFLAKE_ACCOUNT', '').strip().upper()
-        
+        role = os.getenv("SNOWFLAKE_ROLE", "SYNAPSE_APP_ROLE").strip().upper()
+        warehouse = os.getenv('SNOWFLAKE_WAREHOUSE', 'COMPUTE_WH').strip().upper()
+        schema = os.getenv("SNOWFLAKE_SCHEMA", RAG_SCHEMA).strip().upper()
+
         conn_params = {
             "user": user,
             "account": account,
             "database": os.getenv('SNOWFLAKE_DATABASE', RAG_DB),
-            "warehouse": os.getenv('SNOWFLAKE_WAREHOUSE', 'COMPUTE_WH').strip().upper(),
-            "schema": RAG_SCHEMA,
-            "role": "SYSADMIN", # Forzamos el rol que vimos en la captura
+            "warehouse": warehouse,
+            "schema": schema,
+            "role": role,
             "client_prefetch_mfa_token": False,
             "client_request_mfa_token": False
         }
@@ -35,6 +38,13 @@ class SnowflakeService:
             conn_params["password"] = os.getenv('SNOWFLAKE_PASSWORD')
 
         self.conn = snowflake.connector.connect(**conn_params)
+        # Asegura warehouse activo en sesión (evita 57P03 con roles de servicio)
+        cur = self.conn.cursor()
+        try:
+            cur.execute(f"USE ROLE {role}")
+            cur.execute(f"USE WAREHOUSE {warehouse}")
+        finally:
+            cur.close()
 
     # ------------------------------------------------------------------
     # DATOS DE PAUTA REAL (UA_ECOMM)
