@@ -4,6 +4,13 @@ import uuid
 from datetime import date, datetime, timedelta
 from typing import Optional, Union, List, Tuple, Dict, Any
 from models.synapse import SynapseResponse, ChartConfig, DecisionMeta, RecommendedAction
+from services.snowflake_catalog import (
+    HEAVY_TABLES_SAMPLE_SQL,
+    is_allowed_identifier,
+    max_catalog_fetches,
+    rank_datasets_for_query,
+    sample_row_limit,
+)
 
 RAG_DB     = "DB_BT_UA"
 RAG_SCHEMA = "BT_UA_MART_ANALYTICS"
@@ -643,45 +650,85 @@ class SnowflakeService:
             print(f"VENTAS gold warning: {e}")
             return []
 
+    def _fetch_dataset_sample(self, cursor, table: str) -> List[Dict]:
+        """Muestra segura (whitelist) de una tabla/vista Gold del catálogo."""
+        if not is_allowed_identifier(table):
+            return []
+        limit = sample_row_limit()
+        fq = f"{self.gold_db}.{self.gold_schema}.{table}"
+        tpl = HEAVY_TABLES_SAMPLE_SQL.get(table)
+        if tpl:
+            sql = tpl.format(fq=fq, limit=limit)
+        else:
+            sql = f"SELECT * FROM {fq} LIMIT {limit}"
+        try:
+            cursor.execute(sql)
+            rows = cursor.fetchall()
+            cols = [d[0] for d in cursor.description]
+            return [dict(zip(cols, r)) for r in rows] if rows else []
+        except Exception as e:
+            print(f"[Snowflake] sample {table}: {e}")
+            try:
+                cursor.execute(f"SELECT * FROM {fq} LIMIT {limit}")
+                rows = cursor.fetchall()
+                cols = [d[0] for d in cursor.description]
+                return [dict(zip(cols, r)) for r in rows] if rows else []
+            except Exception as e2:
+                print(f"[Snowflake] sample fallback {table}: {e2}")
+                return []
+
     def _build_ads_context(self, cursor, query: str) -> Tuple[str, List, Optional[ChartConfig]]:
-        """Construye contexto de datos de pauta con detección de plataforma."""
+        """Contexto Gold: catálogo completo (DATA_STRUCTURE) + métricas por plataforma cuando aplique."""
         context_parts = []
         raw_data = []
         chart_config = None
+        q_upper = query.upper()
 
-        # Detectar plataformas relevantes en la consulta
         platforms = []
-        if any(k in query.upper() for k in ["GOOGLE", "SEM", "SEARCH"]):
+        if any(k in q_upper for k in ["GOOGLE", "SEM", "SEARCH"]):
             platforms.append("GOOGLE")
-        if any(k in query.upper() for k in ["FACEBOOK", "META", "FB", "INSTAGRAM"]):
+        if any(k in q_upper for k in ["FACEBOOK", "META", "FB", "INSTAGRAM"]):
             platforms.append("FACEBOOK")
-        if any(k in query.upper() for k in ["CRITEO", "RETARGETING", "DISPLAY"]):
+        if any(k in q_upper for k in ["CRITEO", "RETARGETING", "DISPLAY"]):
             platforms.append("CRITEO")
 
-        # Traer todas solo si la consulta apunta a performance/ROAS.
-        if any(k in query.upper() for k in ["ROAS", "GENERAL", "TODAS", "RESUMEN", "ESTRATEG", "RENDIMIENTO", "TENDENCIA"]):
+        if any(k in q_upper for k in ["ROAS", "GENERAL", "TODAS", "RESUMEN", "ESTRATEG", "RENDIMIENTO", "TENDENCIA"]):
             platforms = ["GOOGLE", "FACEBOOK", "CRITEO"]
-        elif not platforms:
-            # Sin keywords de plataforma: no forzar ROAS por canal, pero sí traer evidencia Gold
-            # (ventas por fuente) para que el guardrail no bloquee consultas genéricas con data real.
-            sales = self._get_sales_data(cursor)
-            if sales:
-                context_parts.append("=== VENTAS POR FUENTE (Gold) ===")
-                context_parts.append(str(sales[:3]))
-                raw_data.extend(sales[:5])
-            return "\n\n".join(context_parts), raw_data, chart_config
+
+        max_tables = max_catalog_fetches()
+        ranked = rank_datasets_for_query(query, max_tables)
+
+        for table in ranked:
+            rows = self._fetch_dataset_sample(cursor, table)
+            if not rows:
+                continue
+            for r in rows:
+                r["_source_dataset"] = table
+            context_parts.append(f"=== {table} (muestra autorizada Gold) ===")
+            context_parts.append(str(rows[:2]))
+            raw_data.extend(rows)
 
         for platform in platforms:
             metrics = self._get_platform_metrics(cursor, platform)
             if metrics:
-                context_parts.append(f"=== {platform} ADS (últimas filas) ===")
+                for r in metrics:
+                    r["_source_dataset"] = f"FCT_PERFORMANCE_{platform}"
+                context_parts.append(f"=== {platform} ADS (filtrado FCT_PERFORMANCE) ===")
                 context_parts.append(str(metrics[:3]))
                 raw_data.extend(metrics[:5])
 
-        # Construir chart_config con columnas exactas: DATE y ROAS
+        if not raw_data:
+            sales = self._get_sales_data(cursor)
+            if sales:
+                for r in sales:
+                    r["_source_dataset"] = "FCT_PERFORMANCE_VENTAS_RESUMEN"
+                context_parts.append("=== VENTAS POR FUENTE (Gold, fallback) ===")
+                context_parts.append(str(sales[:3]))
+                raw_data.extend(sales[:5])
+
         if raw_data and len(raw_data) >= 2:
-            # Agrupar por fecha (puede haber múltiples campañas por fecha)
             from collections import defaultdict
+
             date_roas: dict = defaultdict(list)
             for row in raw_data:
                 date_val = str(row.get("DATE", ""))
@@ -690,23 +737,20 @@ class SnowflakeService:
                     date_roas[date_val].append(float(roas_val))
 
             if date_roas:
-                sorted_dates = sorted(date_roas.keys())[-14:]  # últimas 2 semanas
+                sorted_dates = sorted(date_roas.keys())[-14:]
                 avg_roas = [round(sum(date_roas[d]) / len(date_roas[d]), 2) for d in sorted_dates]
                 chart_config = ChartConfig(
                     type="line",
                     x_axis=sorted_dates,
                     y_axis=avg_roas,
-                    metrics_label="ROAS (CONVERSION_VALUE / COST)"
+                    metrics_label="ROAS (CONVERSION_VALUE / COST)",
                 )
 
-        # Ventas reales
-        if any(k in query.upper() for k in ["VENTA", "REVENUE", "INGRESO", "ECOMMERCE", "ROAS", "ESTRATEG"]):
+        if any(k in q_upper for k in ["VENTA", "REVENUE", "INGRESO", "ECOMMERCE", "ROAS", "ESTRATEG"]) and raw_data:
             sales = self._get_sales_data(cursor)
             if sales:
-                context_parts.append("=== VENTAS POR PLATAFORMA ===")
+                context_parts.append("=== VENTAS POR PLATAFORMA (refuerzo) ===")
                 context_parts.append(str(sales[:3]))
-                if not raw_data:
-                    raw_data = sales
 
         return "\n\n".join(context_parts), raw_data, chart_config
 
@@ -785,6 +829,44 @@ class SnowflakeService:
             except Exception as e:
                 print(f"SOV warning: {e}")
 
+        qu = query.upper()
+        if any(k in qu for k in ["BUENTIPO", "BUEN TIPO"]):
+            try:
+                cursor.execute(f"SELECT * FROM {RAG_DB}.{RAG_SCHEMA}.BUENTIPO_CHUNKS LIMIT 4")
+                rows = cursor.fetchall()
+                cols = [desc[0] for desc in cursor.description]
+                if rows:
+                    parts.append("=== BUENTIPO CHUNKS ===")
+                    parts.append(str([dict(zip(cols, r)) for r in rows])[:4000])
+            except Exception as e:
+                print(f"BUENTIPO_CHUNKS warning: {e}")
+
+        if any(k in qu for k in ["ECOM CHUNK", "REPORTE ECOMM", "PDF ECOMM"]) or (
+            "ECOM" in qu and "CHUNK" in qu
+        ):
+            try:
+                cursor.execute(f"SELECT * FROM {RAG_DB}.{RAG_SCHEMA}.ECOM_CHUNKS LIMIT 4")
+                rows = cursor.fetchall()
+                cols = [desc[0] for desc in cursor.description]
+                if rows:
+                    parts.append("=== ECOM CHUNKS ===")
+                    parts.append(str([dict(zip(cols, r)) for r in rows])[:4000])
+            except Exception as e:
+                print(f"ECOM_CHUNKS warning: {e}")
+
+        if any(k in qu for k in ["REPORTE CHUNK", "CHUNK REPORTE"]) or (
+            "REPORTES" in qu and "CHUNK" in qu
+        ):
+            try:
+                cursor.execute(f"SELECT * FROM {RAG_DB}.{RAG_SCHEMA}.REPORTES_CHUNKS LIMIT 4")
+                rows = cursor.fetchall()
+                cols = [desc[0] for desc in cursor.description]
+                if rows:
+                    parts.append("=== REPORTES CHUNKS ===")
+                    parts.append(str([dict(zip(cols, r)) for r in rows])[:4000])
+            except Exception as e:
+                print(f"REPORTES_CHUNKS warning: {e}")
+
         return "\n\n".join(parts) if parts else ""
 
     # ------------------------------------------------------------------
@@ -839,7 +921,8 @@ class SnowflakeService:
 
             # 4. Prompt para Cortex
             prompt = f"""Eres Synapse, Analista de Marketing Senior de la agencia Buentipo.
-Tienes acceso exclusivamente a tablas de la capa Gold en Snowflake.
+Tienes acceso exclusivamente a tablas/vistas de la capa Gold en Snowflake (catálogo completo UA: performance, brand, atribución, ecommerce, social, DQ, markup, etc.).
+Cada fila puede incluir el campo _source_dataset indicando el origen (tabla/vista).
 Responde de forma ejecutiva, directa y orientada a la acción estratégica.
 
 {f"HISTORIAL:{chr(10)}{history_context}{chr(10)}" if history_context else ""}
@@ -848,7 +931,7 @@ Responde de forma ejecutiva, directa y orientada a la acción estratégica.
 PREGUNTA: {query}
 
 INSTRUCCIONES:
-- Usa cifras concretas de los datos cuando estén disponibles.
+- Usa cifras concretas de los datos cuando estén disponibles; cita el dataset (_source_dataset) cuando compares fuentes.
 - Incluye comparativo obligatorio vs semana previa cuando exista data.
 - Cita riesgos/guardrails cuando la muestra o calidad de datos sea limitada.
 - Formato obligatorio:
