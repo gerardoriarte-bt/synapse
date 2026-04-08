@@ -1,5 +1,6 @@
 import snowflake.connector
 import os
+import re
 import uuid
 from datetime import date, datetime, timedelta
 from typing import Optional, Union, List, Tuple, Dict, Any
@@ -62,6 +63,84 @@ class SnowflakeService:
         ]
         q = query.upper()
         return any(term in q for term in chart_terms)
+
+    def _wants_campaign_inventory(self, query: str) -> bool:
+        """Listados de campañas por periodo / activas (no mezclar con muestras genéricas del catálogo)."""
+        q = query.upper()
+        if not any(t in q for t in ("CAMPAÑA", "CAMPAIGNS", "CAMPAIGN", "CAMPANA")):
+            return False
+        return any(
+            t in q
+            for t in (
+                "ACTIVA",
+                "ACTIVAS",
+                "ACTIVO",
+                "LISTADO",
+                "LISTA",
+                "CUÁLES",
+                "CUALES",
+                "QUÉ CAMPA",
+                "QUE CAMPA",
+                "NOMBRE",
+                "HUBO",
+                "HAY",
+                "FUERON",
+                "ESTUVIERON",
+                "DURANTE",
+                "AÑO",
+                "ANIO",
+                "PERIODO",
+                "PERÍODO",
+            )
+        )
+
+    def _campaign_year_bounds(self, query: str) -> Optional[Tuple[int, int]]:
+        """Años calendario 20xx en la pregunta; (inicio, fin) inclusive. None si no hay año explícito."""
+        years = sorted({int(y) for y in re.findall(r"\b(20[2-3]\d)\b", query)})
+        if not years:
+            return None
+        return (years[0], years[-1])
+
+    def _get_campaigns_active_in_range(
+        self, cursor, year_start: int, year_end: int
+    ) -> Tuple[List[Dict], Optional[ChartConfig]]:
+        """
+        Campañas con actividad (gasto, clicks, impresiones u órdenes) en FCT_PERFORMANCE
+        dentro del rango de años [year_start, year_end].
+        """
+        if year_start < 2000 or year_end > 2100 or year_start > year_end:
+            return [], None
+        d0 = f"{year_start}-01-01"
+        d1 = f"{year_end + 1}-01-01"
+        try:
+            cursor.execute(f"""
+                SELECT
+                    COALESCE(CAMPAIGN_PRIMARIO, 'SIN_CAMPAÑA')     AS CAMPAIGN_PRIMARIO,
+                    COALESCE(FUENTE, 'SIN_FUENTE')                AS FUENTE,
+                    MIN(DATE)                                     AS FECHA_PRIMERA_ACTIVIDAD,
+                    MAX(DATE)                                     AS FECHA_ULTIMA_ACTIVIDAD,
+                    SUM(COALESCE(COST_USD, 0))                    AS GASTO_USD_PERIODO,
+                    SUM(COALESCE(CLICKS, 0))                      AS CLICKS_PERIODO,
+                    SUM(COALESCE(IMPRESSIONS, 0))                 AS IMPRESIONES_PERIODO,
+                    SUM(COALESCE(ORDENES_VENDIDAS, 0))            AS ORDENES_PERIODO,
+                    SUM(COALESCE(INGRESOS_USD, 0))                AS INGRESOS_USD_PERIODO
+                FROM {self.gold_db}.{self.gold_schema}.FCT_PERFORMANCE
+                WHERE DATE >= '{d0}' AND DATE < '{d1}'
+                GROUP BY 1, 2
+                HAVING SUM(COALESCE(COST_USD, 0)) > 0
+                    OR SUM(COALESCE(CLICKS, 0)) > 0
+                    OR SUM(COALESCE(IMPRESSIONS, 0)) > 0
+                    OR SUM(COALESCE(ORDENES_VENDIDAS, 0)) > 0
+                ORDER BY GASTO_USD_PERIODO DESC NULLS LAST, CLICKS_PERIODO DESC
+                LIMIT 400
+            """)
+            rows = cursor.fetchall()
+            cols = [d[0] for d in cursor.description]
+            data = [dict(zip(cols, r)) for r in rows] if rows else []
+            return data, None
+        except Exception as e:
+            print(f"campaign inventory warning: {e}")
+            return [], None
 
     def _wants_top_products(self, query: str) -> bool:
         q = query.upper()
@@ -559,7 +638,13 @@ class SnowflakeService:
                 context_parts.append(str(sales[:3]))
                 raw_data.extend(sales[:5])
 
-        if raw_data and len(raw_data) >= 2:
+        # Gráfico ROAS solo si el usuario pidió visualización / tendencia / ROAS explícitamente.
+        if (
+            chart_config is None
+            and self._wants_chart(query)
+            and raw_data
+            and len(raw_data) >= 2
+        ):
             from collections import defaultdict
 
             date_roas: dict = defaultdict(list)
@@ -712,7 +797,24 @@ class SnowflakeService:
             intent = self._classify_intent(query)
 
             # 1. Datos reales según intención de consulta
-            if self._wants_top_products(query):
+            if self._wants_campaign_inventory(query):
+                bounds = self._campaign_year_bounds(query)
+                if bounds is None:
+                    bounds = (datetime.utcnow().year, datetime.utcnow().year)
+                ys, ye = bounds
+                raw_data, chart_config = self._get_campaigns_active_in_range(cursor, ys, ye)
+                for r in raw_data:
+                    r["_source_dataset"] = "FCT_PERFORMANCE_CAMPAIGN_INVENTORY"
+                periodo = str(ys) if ys == ye else f"{ys}–{ye}"
+                ads_context = (
+                    f"=== INVENTARIO DE CAMPAÑAS CON ACTIVIDAD EN {periodo} (performance UA) ===\n"
+                    "Instrucción: el cliente pidió campañas en ese periodo. Responde con la lista y "
+                    "desglose por fuente según las filas; no cambies de tema a ROAS ni gráficos de "
+                    "tendencia si no los pidió. No inventes campañas fuera de esta evidencia.\n"
+                )
+                if raw_data:
+                    ads_context += str(raw_data[:30])
+            elif self._wants_top_products(query):
                 top_n = self._extract_top_n(query, default=5)
                 raw_data, chart_config = self._get_top_products_by_source(cursor, limit=top_n)
                 ads_context = ""
