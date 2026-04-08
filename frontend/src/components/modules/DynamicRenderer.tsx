@@ -4,6 +4,7 @@ import { ChartModule } from './ChartModule';
 import { TableModule } from './TableModule';
 import { ActionToolbar } from './ActionToolbar';
 import { AlertCircle } from 'lucide-react';
+import { StructuredNarrative } from '@/components/shared/StructuredNarrative';
 
 interface Props {
   data: SynapseResponse;
@@ -40,8 +41,8 @@ export const DynamicRenderer: React.FC<Props> = ({ data }) => {
   return (
     <div className="w-full space-y-6 p-6 bg-zinc-900/30 border border-zinc-800 rounded-2xl animate-in zoom-in-95 duration-500">
       {/* Narrativa */}
-      <section className="text-zinc-100 text-lg leading-relaxed font-medium">
-        {narrative}
+      <section className="rounded-xl border border-zinc-800/70 bg-zinc-950/40 p-5">
+        <StructuredNarrative text={narrative} />
       </section>
 
       {decision_meta && (

@@ -2,6 +2,7 @@ import React from 'react';
 import { TrendingUp, AlertTriangle, Lightbulb, ArrowUpRight, BarChart3 } from 'lucide-react';
 import { SynapseResponse } from '@/types/synapse';
 import { ChartModule } from './ChartModule';
+import { StructuredNarrative } from '@/components/shared/StructuredNarrative';
 
 interface Props {
   data: SynapseResponse | null;
@@ -83,9 +84,7 @@ export const IntelligenceDashboard: React.FC<Props> = ({ data, isLoading }) => {
           </div>
         </div>
         <div className="relative z-10">
-          <p className="text-zinc-300 text-lg leading-relaxed font-semibold tracking-tight">
-            {data.narrative}
-          </p>
+          <StructuredNarrative text={data.narrative} compact />
         </div>
         <button className="relative z-10 flex items-center gap-3 text-white font-black text-[10px] uppercase tracking-[0.2em] bg-indigo-600 px-8 py-4 rounded-2xl border border-indigo-400/40 hover:bg-indigo-500 transition-all shadow-xl shadow-indigo-600/20 active:scale-95">
           Execute Intelligence Strategy <ArrowUpRight size={18} />
