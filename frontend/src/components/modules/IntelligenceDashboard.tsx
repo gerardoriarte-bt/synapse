@@ -37,7 +37,7 @@ export const IntelligenceDashboard: React.FC<Props> = ({ data, isLoading }) => {
       <section className="rounded-xl border border-zinc-800/70 bg-zinc-950/40 p-5">
         <p className="whitespace-pre-wrap text-zinc-100 leading-relaxed">{data.narrative}</p>
       </section>
-      {smartChartConfig && <ChartModule config={smartChartConfig} data={data.raw_data} />}
+      {smartChartConfig && <ChartModule config={smartChartConfig} />}
       {data.raw_data && data.raw_data.length > 0 && <TableModule data={data.raw_data} />}
     </div>
   );

@@ -126,5 +126,6 @@ export const inferChartConfigFromRawData = (rawData?: unknown[]): ChartConfig | 
     x_axis: limited.map((p) => p.x),
     y_axis: limited.map((p) => Number(p.y.toFixed(2))),
     metrics_label: prettifyLabel(metricKey),
+    x_axis_label: prettifyLabel(dimensionKey),
   };
 };

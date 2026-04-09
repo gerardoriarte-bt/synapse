@@ -3,6 +3,7 @@ export interface ChartConfig {
   x_axis: (string | number)[];
   y_axis: number[];
   metrics_label: string;
+  x_axis_label?: string;
 }
 
 export interface RecommendedAction {
@@ -18,7 +19,7 @@ export interface DecisionMeta {
   confidence_score: number;
   data_freshness: string;
   guardrails: string[];
-  comparisons: Record<string, any>;
+  comparisons: Record<string, unknown>;
   actions: RecommendedAction[];
 }
 
@@ -27,7 +28,7 @@ export interface SynapseResponse {
   narrative: string;
   render_type: 'text' | 'chart' | 'table';
   chart_config?: ChartConfig;
-  raw_data?: any[];
+  raw_data?: Array<Record<string, unknown>>;
   decision_meta?: DecisionMeta;
   /** Presente si el backend usa modo Cortex Analyst */
   cortex_analyst?: Record<string, unknown>;

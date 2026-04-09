@@ -21,10 +21,9 @@ import { ChartConfig } from '@/types/synapse';
 
 interface Props {
   config: ChartConfig;
-  data?: unknown[];
 }
 
-export const ChartModule: React.FC<Props> = ({ config, data }) => {
+export const ChartModule: React.FC<Props> = ({ config }) => {
   const chartData = config.x_axis.map((x, i) => ({
     name: x,
     value: config.y_axis[i] ?? 0,
@@ -38,38 +37,16 @@ export const ChartModule: React.FC<Props> = ({ config, data }) => {
       : config.type === 'donut'
       ? `Distribución de ${label}`
       : `Tendencia de ${label}`;
-  const xAxisTitle =
-    typeof config.x_axis[0] === 'string' && String(config.x_axis[0]).includes('-')
-      ? 'Periodo / Fecha'
-      : 'Dimensión analizada';
-  const sources =
-    data && data.length > 0
-      ? Array.from(
-          new Set(
-            data
-              .map((row) => {
-                if (!row || typeof row !== 'object' || Array.isArray(row)) return null;
-                const rec = row as Record<string, unknown>;
-                return rec.FUENTE || rec.CHANNEL || rec.PLATAFORMA;
-              })
-              .filter(Boolean)
-          )
-        ).slice(0, 3)
-      : [];
+  const xAxisTitle = config.x_axis_label || 'Dimensión';
 
   return (
     <div className="w-full space-y-3 bg-gradient-to-b from-zinc-950 to-zinc-900/90 p-4 border border-zinc-800 rounded-2xl shadow-inner">
       <div className="space-y-1">
         <h4 className="text-sm font-extrabold text-zinc-100 tracking-tight">{title}</h4>
         <p className="text-[11px] text-zinc-400">
-          Métrica: <span className="text-zinc-200 font-semibold">{label}</span> · Puntos analizados:{' '}
+          Eje Y: <span className="text-zinc-200 font-semibold">{label}</span> · Eje X:{' '}
+          <span className="text-zinc-200 font-semibold">{xAxisTitle}</span> · Puntos analizados:{' '}
           <span className="text-zinc-200 font-semibold">{chartData.length}</span>
-          {sources.length > 0 && (
-            <>
-              {' '}· Fuente/canal:{' '}
-              <span className="text-zinc-200 font-semibold">{sources.join(', ')}</span>
-            </>
-          )}
         </p>
       </div>
       <div className="h-72">

@@ -18,7 +18,7 @@ export const DynamicRenderer: React.FC<Props> = ({ data }) => {
     switch (render_type) {
       case 'chart':
         return inferredChartConfig ? (
-          <ChartModule config={inferredChartConfig} data={raw_data} />
+          <ChartModule config={inferredChartConfig} />
         ) : (
           <RenderError message="Faltan datos de configuración para el gráfico." />
         );
@@ -26,7 +26,7 @@ export const DynamicRenderer: React.FC<Props> = ({ data }) => {
       case 'table':
         return raw_data ? (
           <div className="space-y-4">
-            {inferredChartConfig && <ChartModule config={inferredChartConfig} data={raw_data} />}
+            {inferredChartConfig && <ChartModule config={inferredChartConfig} />}
             <TableModule data={raw_data} />
           </div>
         ) : (

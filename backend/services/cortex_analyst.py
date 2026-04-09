@@ -383,6 +383,7 @@ def _parse_analyst_body(body: Dict[str, Any]) -> Tuple[str, Optional[str], List[
 
     narrative = "\n\n".join(p for p in narrative_parts if p).strip()
     narrative = _sanitize_english_preamble(narrative)
+    narrative = _sanitize_brand_terms(narrative)
     warnings_list: List[str] = []
     for w in body.get("warnings") or []:
         if isinstance(w, dict) and w.get("message"):
@@ -414,6 +415,14 @@ def _sanitize_english_preamble(text: str) -> str:
     # Si quedó una línea en inglés tipo "Show ...", la mantenemos para no perder semántica,
     # pero eliminamos doble salto al inicio.
     return cleaned.lstrip()
+
+
+def _sanitize_brand_terms(text: str) -> str:
+    """Evita mencionar proveedores de datos; marca visible al cliente = Synapse."""
+    if not text:
+        return text
+    out = re.sub(r"\bsnowflake\b", "Synapse", text, flags=re.IGNORECASE)
+    return out
 
 
 def _parse_agent_run_body(body: Dict[str, Any]) -> Tuple[str, Optional[str], List[str], Dict[str, Any]]:
@@ -457,6 +466,8 @@ def _parse_agent_run_body(body: Dict[str, Any]) -> Tuple[str, Optional[str], Lis
             if isinstance(val, str) and val.strip():
                 narrative = val.strip()
                 break
+    narrative = _sanitize_english_preamble(narrative)
+    narrative = _sanitize_brand_terms(narrative)
     if body.get("response_metadata"):
         extra["response_metadata"] = body.get("response_metadata")
     if body.get("thread_id") is not None:
@@ -517,14 +528,14 @@ def _execute_analyst_sql(sql: str, max_rows: int) -> List[Dict[str, Any]]:
 
 
 def _conversational_data_addendum(raw_data: List[Dict[str, Any]]) -> str:
-    """Resumen conversacional breve de la evidencia tabular devuelta por Snowflake."""
+    """Resumen conversacional breve de la evidencia tabular devuelta por Synapse."""
     if not raw_data:
         return ""
     cols = list(raw_data[0].keys()) if isinstance(raw_data[0], dict) else []
     col_preview = ", ".join(cols[:8]) + ("..." if len(cols) > 8 else "")
     return (
         "Lectura rápida de los datos:\n"
-        f"- Snowflake devolvió {len(raw_data)} filas con {len(cols)} columnas.\n"
+        f"- Synapse devolvió {len(raw_data)} filas con {len(cols)} columnas.\n"
         f"- Columnas principales: {col_preview}."
     )
 
