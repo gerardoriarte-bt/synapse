@@ -28,6 +28,10 @@ def build_snowflake_connection_params() -> Dict[str, Any]:
     warehouse = os.getenv("SNOWFLAKE_WAREHOUSE", "COMPUTE_WH").strip().upper()
     schema = os.getenv("SNOWFLAKE_SCHEMA", RAG_SCHEMA).strip().upper()
 
+    login_timeout = int(os.getenv("SNOWFLAKE_LOGIN_TIMEOUT_SEC", "15"))
+    network_timeout = int(os.getenv("SNOWFLAKE_NETWORK_TIMEOUT_SEC", "60"))
+    statement_timeout = int(os.getenv("SNOWFLAKE_STATEMENT_TIMEOUT_SEC", "90"))
+
     conn_params: Dict[str, Any] = {
         "user": user,
         "account": account,
@@ -37,6 +41,11 @@ def build_snowflake_connection_params() -> Dict[str, Any]:
         "role": role,
         "client_prefetch_mfa_token": False,
         "client_request_mfa_token": False,
+        "login_timeout": login_timeout,
+        "network_timeout": network_timeout,
+        "session_parameters": {
+            "STATEMENT_TIMEOUT_IN_SECONDS": statement_timeout,
+        },
     }
 
     if token:

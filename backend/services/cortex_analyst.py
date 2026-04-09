@@ -13,8 +13,6 @@ from typing import Any, Dict, List, Optional, Tuple
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
-import snowflake.connector
-
 from models.synapse import DecisionMeta, SynapseResponse
 from services.snowflake import connect_snowflake
 
@@ -45,6 +43,19 @@ def _auth_headers() -> Dict[str, str]:
     return headers
 
 
+def _cortex_api_mode() -> str:
+    return os.getenv("CORTEX_API_MODE", "analyst").strip().lower()
+
+
+def _endpoint_path() -> str:
+    explicit = os.getenv("CORTEX_API_ENDPOINT", "").strip()
+    if explicit:
+        return explicit if explicit.startswith("/") else f"/{explicit}"
+    if _cortex_api_mode() == "agent_run":
+        return "/api/v2/cortex/agent:run"
+    return "/api/v2/cortex/analyst/message"
+
+
 def _build_messages(user_query: str, history: List[Dict[str, str]]) -> List[Dict[str, Any]]:
     """Cortex Analyst acepta mensajes user; el historial se compacta en un solo turno si hace falta."""
     if not history:
@@ -59,6 +70,27 @@ def _build_messages(user_query: str, history: List[Dict[str, str]]) -> List[Dict
         f"Contexto de conversación reciente:\n{block}\n\n---\n\nPregunta actual:\n{user_query}"
     )
     return [{"role": "user", "content": [{"type": "text", "text": text}]}]
+
+
+def _agent_run_payload(user_query: str, history: List[Dict[str, str]]) -> Dict[str, Any]:
+    payload: Dict[str, Any] = {
+        "thread_id": int(os.getenv("CORTEX_AGENT_THREAD_ID", "0")),
+        "parent_message_id": int(os.getenv("CORTEX_AGENT_PARENT_MESSAGE_ID", "0")),
+        "messages": _build_messages(user_query, history),
+        "stream": False,
+    }
+    extra = os.getenv("CORTEX_AGENT_RUN_CONFIG_JSON", "").strip()
+    if extra:
+        try:
+            parsed = json.loads(extra)
+        except json.JSONDecodeError as e:
+            raise ValueError(f"CORTEX_AGENT_RUN_CONFIG_JSON no es JSON válido: {e}") from e
+        if not isinstance(parsed, dict):
+            raise ValueError("CORTEX_AGENT_RUN_CONFIG_JSON debe ser un objeto JSON.")
+        payload.update(parsed)
+        payload["messages"] = _build_messages(user_query, history)
+        payload["stream"] = False
+    return payload
 
 
 def _semantic_payload() -> Dict[str, Any]:
@@ -126,6 +158,56 @@ def _parse_analyst_body(body: Dict[str, Any]) -> Tuple[str, Optional[str], List[
     return narrative, sql_statement, warnings_list, extra
 
 
+def _parse_agent_run_body(body: Dict[str, Any]) -> Tuple[str, Optional[str], List[str], Dict[str, Any]]:
+    """
+    Parser tolerante para Agent Run.
+    La estructura exacta puede variar por versión/modelo, así que extraemos texto/SQL de forma flexible.
+    """
+    text_parts: List[str] = []
+    sql_statement: Optional[str] = None
+    warnings_list: List[str] = []
+    extra: Dict[str, Any] = {}
+
+    def walk(node: Any) -> None:
+        nonlocal sql_statement
+        if isinstance(node, dict):
+            ntype = str(node.get("type") or "").lower()
+            if ntype == "text" and node.get("text"):
+                text_parts.append(str(node.get("text")))
+            if ntype == "sql" and node.get("statement") and sql_statement is None:
+                sql_statement = str(node.get("statement"))
+            if node.get("warnings") and isinstance(node.get("warnings"), list):
+                for w in node["warnings"]:
+                    if isinstance(w, dict) and w.get("message"):
+                        warnings_list.append(str(w["message"]))
+            if "request_id" in node:
+                extra["request_id"] = node.get("request_id")
+            for v in node.values():
+                walk(v)
+        elif isinstance(node, list):
+            for i in node:
+                walk(i)
+        elif isinstance(node, str):
+            pass
+
+    walk(body)
+    narrative = "\n\n".join([p.strip() for p in text_parts if p and p.strip()]).strip()
+    if not narrative:
+        # Fallback para respuestas donde el texto viene en campos alternos.
+        for key in ("response", "answer", "output_text"):
+            val = body.get(key)
+            if isinstance(val, str) and val.strip():
+                narrative = val.strip()
+                break
+    if body.get("response_metadata"):
+        extra["response_metadata"] = body.get("response_metadata")
+    if body.get("thread_id") is not None:
+        extra["thread_id"] = body.get("thread_id")
+    if body.get("parent_message_id") is not None:
+        extra["parent_message_id"] = body.get("parent_message_id")
+    return narrative, sql_statement, list(dict.fromkeys(warnings_list)), extra
+
+
 def _sql_safe_readonly(sql: str) -> bool:
     s = sql.strip()
     if not s:
@@ -177,12 +259,16 @@ def call_cortex_analyst_api(
     user_query: str,
     history: List[Dict[str, str]],
 ) -> Dict[str, Any]:
-    url = f"{_rest_base_url()}/api/v2/cortex/analyst/message"
-    payload: Dict[str, Any] = {
-        "messages": _build_messages(user_query, history),
-        **_semantic_payload(),
-        "stream": False,
-    }
+    mode = _cortex_api_mode()
+    url = f"{_rest_base_url()}{_endpoint_path()}"
+    if mode == "agent_run":
+        payload = _agent_run_payload(user_query, history)
+    else:
+        payload = {
+            "messages": _build_messages(user_query, history),
+            **_semantic_payload(),
+            "stream": False,
+        }
     data = json.dumps(payload).encode("utf-8")
     req = Request(url, data=data, method="POST", headers=_auth_headers())
     try:
@@ -208,11 +294,28 @@ def validate_cortex_analyst_config() -> Dict[str, Any]:
         _auth_headers()
     except Exception as e:
         errors.append(f"Token: {e}")
-    try:
-        _semantic_payload()
-    except Exception as e:
-        errors.append(f"Modelo semántico: {e}")
-    return {"ok": not errors, "rest_base_url": rest, "errors": errors}
+    mode = _cortex_api_mode()
+    if mode == "agent_run":
+        extra = os.getenv("CORTEX_AGENT_RUN_CONFIG_JSON", "").strip()
+        if extra:
+            try:
+                parsed = json.loads(extra)
+                if not isinstance(parsed, dict):
+                    errors.append("CORTEX_AGENT_RUN_CONFIG_JSON debe ser objeto JSON.")
+            except Exception as e:
+                errors.append(f"Agent run config: {e}")
+    else:
+        try:
+            _semantic_payload()
+        except Exception as e:
+            errors.append(f"Modelo semántico: {e}")
+    return {
+        "ok": not errors,
+        "rest_base_url": rest,
+        "mode": mode,
+        "endpoint": _endpoint_path(),
+        "errors": errors,
+    }
 
 
 def process_with_cortex_analyst(
@@ -220,10 +323,17 @@ def process_with_cortex_analyst(
     history: List[Dict[str, str]],
 ) -> SynapseResponse:
     body = call_cortex_analyst_api(query, history)
-    narrative, sql_statement, warnings, extra = _parse_analyst_body(body)
+    mode = _cortex_api_mode()
+    if mode == "agent_run":
+        narrative, sql_statement, warnings, extra = _parse_agent_run_body(body)
+    else:
+        narrative, sql_statement, warnings, extra = _parse_analyst_body(body)
 
     if not narrative and not sql_statement:
-        narrative = "Cortex Analyst no devolvió texto ni SQL. Revisa el modelo semántico y permisos."
+        narrative = (
+            "El endpoint de Cortex no devolvió texto ni SQL. "
+            "Revisa configuración de Agent/Analyst y permisos."
+        )
 
     execute = os.getenv("SYNAPSE_ANALYST_EXECUTE_SQL", "").strip().lower() in (
         "1",
@@ -250,7 +360,7 @@ def process_with_cortex_analyst(
         meta_extra["generated_sql"] = sql_statement
 
     decision_meta = DecisionMeta(
-        intent="cortex_analyst",
+        intent="cortex_agent" if mode == "agent_run" else "cortex_analyst",
         confidence_score=0.75 if sql_statement else 0.4,
         data_freshness="unknown",
         guardrails=warnings or [],
