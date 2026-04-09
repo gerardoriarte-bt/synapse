@@ -503,6 +503,56 @@ def _sanitize_brand_terms(text: str) -> str:
     return out
 
 
+def _collect_agent_text_fragments(body: Any, limit: int = 10) -> List[str]:
+    found: List[str] = []
+
+    def add_text(value: Any) -> None:
+        if not isinstance(value, str):
+            return
+        txt = value.strip()
+        if len(txt) < 24:
+            return
+        if txt.startswith("{") and txt.endswith("}"):
+            return
+        if txt.lower().startswith("select "):
+            return
+        found.append(txt)
+
+    def walk(node: Any) -> None:
+        if isinstance(node, dict):
+            for k, v in node.items():
+                lk = str(k).lower()
+                if lk in (
+                    "text",
+                    "summary",
+                    "analysis",
+                    "insight",
+                    "recommendation",
+                    "answer",
+                    "output_text",
+                    "content",
+                    "message",
+                ):
+                    add_text(v)
+                walk(v)
+        elif isinstance(node, list):
+            for item in node:
+                walk(item)
+
+    walk(body)
+    unique: List[str] = []
+    seen = set()
+    for t in found:
+        key = t.lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        unique.append(t)
+        if len(unique) >= limit:
+            break
+    return unique
+
+
 def _parse_agent_run_body(body: Dict[str, Any]) -> Tuple[str, Optional[str], List[str], Dict[str, Any]]:
     """
     Parser tolerante para Agent Run.
@@ -537,6 +587,9 @@ def _parse_agent_run_body(body: Dict[str, Any]) -> Tuple[str, Optional[str], Lis
 
     walk(body)
     narrative = "\n\n".join([p.strip() for p in text_parts if p and p.strip()]).strip()
+    fragments = _collect_agent_text_fragments(body)
+    if fragments:
+        extra["agent_text_fragments"] = fragments
     if not narrative:
         # Fallback para respuestas donde el texto viene en campos alternos.
         for key in ("response", "answer", "output_text"):
@@ -544,6 +597,8 @@ def _parse_agent_run_body(body: Dict[str, Any]) -> Tuple[str, Optional[str], Lis
             if isinstance(val, str) and val.strip():
                 narrative = val.strip()
                 break
+    if not narrative and fragments:
+        narrative = "\n\n".join(fragments[:3]).strip()
     narrative = _sanitize_english_preamble(narrative)
     narrative = _sanitize_brand_terms(narrative)
     if body.get("response_metadata"):

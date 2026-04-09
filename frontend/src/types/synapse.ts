@@ -31,7 +31,10 @@ export interface SynapseResponse {
   raw_data?: Array<Record<string, unknown>>;
   decision_meta?: DecisionMeta;
   /** Presente si el backend usa modo Cortex Analyst */
-  cortex_analyst?: Record<string, unknown>;
+  cortex_analyst?: {
+    agent_text_fragments?: string[];
+    [key: string]: unknown;
+  };
   /** Reenviar en el siguiente ask para continuar el hilo Cortex Agent */
   conversation_id?: string;
 }
