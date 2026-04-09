@@ -34,6 +34,14 @@ def _endpoint_path() -> str:
     return "/api/v2/cortex/analyst/message"
 
 
+def _fallback_to_analyst_enabled() -> bool:
+    return os.getenv("CORTEX_AGENT_FALLBACK_TO_ANALYST", "true").strip().lower() in (
+        "1",
+        "true",
+        "yes",
+    )
+
+
 def _build_messages(user_query: str, history: List[Dict[str, str]]) -> List[Dict[str, Any]]:
     """Cortex Analyst: prioriza pregunta actual y aplica guardrails de periodo explícito."""
     period_hint = _explicit_period_hint(user_query)
@@ -533,9 +541,15 @@ def call_cortex_analyst_api(
     *,
     agent_thread_id: Optional[int] = None,
     agent_parent_message_id: Optional[int] = None,
+    force_mode: Optional[str] = None,
 ) -> Dict[str, Any]:
-    mode = _cortex_api_mode()
-    url = f"{rest_base_url()}{_endpoint_path()}"
+    mode = (force_mode or _cortex_api_mode()).strip().lower()
+    endpoint = (
+        "/api/v2/cortex/agent:run"
+        if mode == "agent_run"
+        else "/api/v2/cortex/analyst/message"
+    )
+    url = f"{rest_base_url()}{endpoint}"
     if mode == "agent_run":
         payload = _agent_run_payload(
             user_query,
@@ -562,6 +576,23 @@ def call_cortex_analyst_api(
         raise RuntimeError(f"Cortex Analyst red: {e.reason}") from e
 
 
+def _needs_analyst_fallback(narrative: str, sql_statement: Optional[str]) -> bool:
+    if sql_statement:
+        return False
+    txt = (narrative or "").strip().lower()
+    if not txt:
+        return True
+    triggers = (
+        "ruta del archivo",
+        "source file",
+        "where is the file",
+        "necesito acceder a los archivos",
+        "could you provide the file path",
+        "i need access to files",
+    )
+    return any(t in txt for t in triggers)
+
+
 def validate_cortex_analyst_config() -> Dict[str, Any]:
     """Comprueba variables mínimas sin llamar a la API (útil para /health)."""
     errors: List[str] = []
@@ -584,6 +615,11 @@ def validate_cortex_analyst_config() -> Dict[str, Any]:
                     errors.append("CORTEX_AGENT_RUN_CONFIG_JSON debe ser objeto JSON.")
             except Exception as e:
                 errors.append(f"Agent run config: {e}")
+        if _fallback_to_analyst_enabled():
+            try:
+                _semantic_payload()
+            except Exception as e:
+                errors.append(f"Fallback Analyst (semantic): {e}")
     else:
         try:
             _semantic_payload()
@@ -593,6 +629,7 @@ def validate_cortex_analyst_config() -> Dict[str, Any]:
         "ok": not errors,
         "rest_base_url": rest,
         "mode": mode,
+        "fallback_to_analyst": _fallback_to_analyst_enabled(),
         "endpoint": _endpoint_path(),
         "errors": errors,
     }
@@ -606,15 +643,26 @@ def process_with_cortex_analyst(
     agent_parent_message_id: Optional[int] = None,
     conversation_id: Optional[str] = None,
 ) -> SynapseResponse:
+    mode = _cortex_api_mode()
+    effective_mode = mode
     body = call_cortex_analyst_api(
         query,
         history,
         agent_thread_id=agent_thread_id,
         agent_parent_message_id=agent_parent_message_id,
     )
-    mode = _cortex_api_mode()
     if mode == "agent_run":
         narrative, sql_statement, warnings, extra = _parse_agent_run_body(body)
+        if _fallback_to_analyst_enabled() and _needs_analyst_fallback(narrative, sql_statement):
+            body = call_cortex_analyst_api(
+                query,
+                history,
+                agent_thread_id=agent_thread_id,
+                agent_parent_message_id=agent_parent_message_id,
+                force_mode="analyst",
+            )
+            narrative, sql_statement, warnings, extra = _parse_analyst_body(body)
+            effective_mode = "analyst_fallback"
     else:
         narrative, sql_statement, warnings, extra = _parse_analyst_body(body)
 
@@ -650,9 +698,10 @@ def process_with_cortex_analyst(
         meta_extra["generated_sql"] = sql_statement
     if raw_data is not None:
         meta_extra["returned_rows"] = len(raw_data)
+    meta_extra["effective_mode"] = effective_mode
 
     if (
-        mode == "agent_run"
+        effective_mode == "agent_run"
         and agent_thread_id is not None
         and agent_parent_message_id is not None
     ):
@@ -665,7 +714,7 @@ def process_with_cortex_analyst(
             meta_extra["last_assistant_message_id"] = last_mid
 
     decision_meta = DecisionMeta(
-        intent="cortex_agent" if mode == "agent_run" else "cortex_analyst",
+        intent="cortex_agent" if effective_mode == "agent_run" else "cortex_analyst",
         confidence_score=0.75 if sql_statement else 0.4,
         data_freshness="unknown",
         guardrails=warnings or [],
