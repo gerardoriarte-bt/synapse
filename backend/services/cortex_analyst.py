@@ -74,11 +74,14 @@ def _build_messages(user_query: str, history: List[Dict[str, str]]) -> List[Dict
 
 def _agent_run_payload(user_query: str, history: List[Dict[str, str]]) -> Dict[str, Any]:
     payload: Dict[str, Any] = {
-        "thread_id": int(os.getenv("CORTEX_AGENT_THREAD_ID", "0")),
-        "parent_message_id": int(os.getenv("CORTEX_AGENT_PARENT_MESSAGE_ID", "0")),
         "messages": _build_messages(user_query, history),
         "stream": False,
     }
+    thread_id = os.getenv("CORTEX_AGENT_THREAD_ID", "").strip()
+    parent_message_id = os.getenv("CORTEX_AGENT_PARENT_MESSAGE_ID", "").strip()
+    if thread_id and parent_message_id:
+        payload["thread_id"] = int(thread_id)
+        payload["parent_message_id"] = int(parent_message_id)
     extra = os.getenv("CORTEX_AGENT_RUN_CONFIG_JSON", "").strip()
     if extra:
         try:
