@@ -768,6 +768,7 @@ def process_with_cortex_analyst(
     agent_body: Optional[Dict[str, Any]] = None
     agent_last_mid: Optional[int] = None
     fallback_reason: Optional[str] = None
+    agent_error_message: Optional[str] = None
 
     if mode == "agent_run":
         try:
@@ -778,11 +779,12 @@ def process_with_cortex_analyst(
                 agent_parent_message_id=agent_parent_message_id,
             )
             agent_body = body
-        except Exception:
+        except Exception as e:
             if _fallback_to_analyst_enabled() and _fallback_mode() in (
                 "error_only",
                 "content_or_error",
             ):
+                agent_error_message = str(e)
                 body = call_cortex_analyst_api(
                     query,
                     history,
@@ -874,6 +876,8 @@ def process_with_cortex_analyst(
         meta_extra["agent_payload_mode"] = _agent_payload_mode()
     if fallback_reason:
         meta_extra["fallback_reason"] = fallback_reason
+    if agent_error_message:
+        meta_extra["agent_error"] = agent_error_message
 
     if mode == "agent_run" and agent_body is not None and agent_thread_id is not None:
         agent_last_mid = _extract_assistant_message_id_from_agent_response(agent_body)
