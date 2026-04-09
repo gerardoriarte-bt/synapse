@@ -11,7 +11,7 @@ from services.cortex_http import auth_headers, rest_base_url
 
 
 def create_cortex_thread() -> int:
-    """Crea un hilo nuevo; la API devuelve el thread id (JSON number o string)."""
+    """Crea un hilo nuevo; acepta respuesta number/string u objeto con thread_id."""
     url = f"{rest_base_url()}/api/v2/cortex/threads"
     origin = os.getenv("CORTEX_ORIGIN_APPLICATION", "synapse").strip()[:16] or "synapse"
     payload: Dict[str, Any] = {"origin_application": origin}
@@ -32,6 +32,19 @@ def create_cortex_thread() -> int:
         return parsed
     if isinstance(parsed, str) and parsed.strip().isdigit():
         return int(parsed.strip())
+    if isinstance(parsed, dict):
+        tid = parsed.get("thread_id")
+        if isinstance(tid, int):
+            return tid
+        if isinstance(tid, str) and tid.strip().isdigit():
+            return int(tid.strip())
+        meta = parsed.get("metadata")
+        if isinstance(meta, dict):
+            mtid = meta.get("thread_id")
+            if isinstance(mtid, int):
+                return mtid
+            if isinstance(mtid, str) and mtid.strip().isdigit():
+                return int(mtid.strip())
     raise RuntimeError(f"Respuesta inesperada al crear thread: {raw[:500]}")
 
 
