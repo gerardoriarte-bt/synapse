@@ -589,6 +589,12 @@ def _needs_analyst_fallback(narrative: str, sql_statement: Optional[str]) -> boo
         "necesito acceder a los archivos",
         "could you provide the file path",
         "i need access to files",
+        "no tengo acceso a datos",
+        "no tengo acceso a los datos",
+        "necesitaría acceso a la fuente",
+        "no tengo acceso a la fuente",
+        "i don't have access to data",
+        "i do not have access to data",
     )
     return any(t in txt for t in triggers)
 
