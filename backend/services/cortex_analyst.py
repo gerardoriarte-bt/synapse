@@ -504,13 +504,29 @@ def _execute_analyst_sql(sql: str, max_rows: int) -> List[Dict[str, Any]]:
         cur = conn.cursor()
         try:
             cur.execute(sql)
-            rows = cur.fetchmany(max_rows)
+            if max_rows and max_rows > 0:
+                rows = cur.fetchmany(max_rows)
+            else:
+                rows = cur.fetchall()
             cols = [d[0] for d in cur.description] if cur.description else []
             return [dict(zip(cols, r)) for r in rows] if rows else []
         finally:
             cur.close()
     finally:
         conn.close()
+
+
+def _conversational_data_addendum(raw_data: List[Dict[str, Any]]) -> str:
+    """Resumen conversacional breve de la evidencia tabular devuelta por Snowflake."""
+    if not raw_data:
+        return ""
+    cols = list(raw_data[0].keys()) if isinstance(raw_data[0], dict) else []
+    col_preview = ", ".join(cols[:8]) + ("..." if len(cols) > 8 else "")
+    return (
+        "Lectura rápida de los datos:\n"
+        f"- Snowflake devolvió {len(raw_data)} filas con {len(cols)} columnas.\n"
+        f"- Columnas principales: {col_preview}."
+    )
 
 
 def call_cortex_analyst_api(
@@ -621,10 +637,19 @@ def process_with_cortex_analyst(
 
     if execute and sql_statement:
         try:
-            max_rows = int(os.getenv("SYNAPSE_ANALYST_MAX_ROWS", "500"))
+            # 0 = sin límite (traer todo lo que devuelva Snowflake para la consulta)
+            max_rows = int(os.getenv("SYNAPSE_ANALYST_MAX_ROWS", "0"))
             raw_data = _execute_analyst_sql(sql_statement, max_rows=max_rows)
             if raw_data:
                 render_type = "table"
+                if os.getenv("SYNAPSE_ANALYST_APPEND_DATA_SUMMARY", "true").strip().lower() in (
+                    "1",
+                    "true",
+                    "yes",
+                ):
+                    extra_summary = _conversational_data_addendum(raw_data)
+                    if extra_summary:
+                        narrative = f"{narrative}\n\n{extra_summary}".strip()
         except Exception as e:
             narrative = (
                 f"{narrative}\n\n---\nNo se pudo ejecutar el SQL generado: {e}"
@@ -633,6 +658,8 @@ def process_with_cortex_analyst(
     meta_extra = {**extra, "warnings": warnings}
     if sql_statement:
         meta_extra["generated_sql"] = sql_statement
+    if raw_data is not None:
+        meta_extra["returned_rows"] = len(raw_data)
 
     if (
         mode == "agent_run"
