@@ -9,6 +9,8 @@ from __future__ import annotations
 import json
 import os
 import uuid
+import calendar
+import re
 from typing import Any, Dict, List, Optional, Tuple
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
@@ -32,9 +34,26 @@ def _endpoint_path() -> str:
 
 
 def _build_messages(user_query: str, history: List[Dict[str, str]]) -> List[Dict[str, Any]]:
-    """Cortex Analyst acepta mensajes user; el historial se compacta en un solo turno si hace falta."""
-    if not history:
-        return [{"role": "user", "content": [{"type": "text", "text": user_query}]}]
+    """Cortex Analyst: prioriza pregunta actual y aplica guardrails de periodo explícito."""
+    period_hint = _explicit_period_hint(user_query)
+    strict = (
+        "INSTRUCCIONES OBLIGATORIAS:\n"
+        "- Responde exactamente la pregunta del usuario.\n"
+        "- Si el usuario define periodo (mes/año/rango), filtra SOLO ese periodo.\n"
+        "- No amplíes fechas ni agregues periodos adicionales.\n"
+    )
+    if period_hint:
+        strict += f"- Periodo requerido detectado: {period_hint}\n"
+
+    include_history = os.getenv("CORTEX_INCLUDE_HISTORY", "false").strip().lower() in (
+        "1",
+        "true",
+        "yes",
+    )
+    if not include_history or not history:
+        text = f"{strict}\nPREGUNTA ACTUAL:\n{user_query}"
+        return [{"role": "user", "content": [{"type": "text", "text": text}]}]
+
     lines = []
     for h in history[-5:]:
         q = (h.get("q") or "")[:800]
@@ -42,9 +61,59 @@ def _build_messages(user_query: str, history: List[Dict[str, str]]) -> List[Dict
         lines.append(f"Usuario (antes): {q}\nAnalista (antes): {a}")
     block = "\n\n---\n\n".join(lines)
     text = (
-        f"Contexto de conversación reciente:\n{block}\n\n---\n\nPregunta actual:\n{user_query}"
+        f"{strict}\nContexto de conversación reciente:\n{block}\n\n---\n\nPregunta actual:\n{user_query}"
     )
     return [{"role": "user", "content": [{"type": "text", "text": text}]}]
+
+
+def _explicit_period_hint(query: str) -> Optional[str]:
+    q = (query or "").lower()
+    month_map = {
+        "enero": 1,
+        "febrero": 2,
+        "marzo": 3,
+        "abril": 4,
+        "mayo": 5,
+        "junio": 6,
+        "julio": 7,
+        "agosto": 8,
+        "septiembre": 9,
+        "setiembre": 9,
+        "octubre": 10,
+        "noviembre": 11,
+        "diciembre": 12,
+        "january": 1,
+        "february": 2,
+        "march": 3,
+        "april": 4,
+        "may": 5,
+        "june": 6,
+        "july": 7,
+        "august": 8,
+        "september": 9,
+        "october": 10,
+        "november": 11,
+        "december": 12,
+    }
+
+    for name, month in month_map.items():
+        m1 = re.search(rf"\b{name}\b\s*(?:de\s*)?(20\d{{2}})\b", q)
+        m2 = re.search(rf"\b(20\d{{2}})\b\s*(?:de\s*)?\b{name}\b", q)
+        year = None
+        if m1:
+            year = int(m1.group(1))
+        elif m2:
+            year = int(m2.group(1))
+        if year:
+            start = f"{year:04d}-{month:02d}-01"
+            end_day = calendar.monthrange(year, month)[1]
+            end = f"{year:04d}-{month:02d}-{end_day:02d}"
+            return f"{start} a {end}"
+
+    between = re.search(r"\b(20\d{2}-\d{2}-\d{2})\b.*\b(20\d{2}-\d{2}-\d{2})\b", q)
+    if between:
+        return f"{between.group(1)} a {between.group(2)}"
+    return None
 
 
 def _merge_agent_run_config_extra() -> Dict[str, Any]:
