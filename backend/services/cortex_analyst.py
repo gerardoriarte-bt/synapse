@@ -527,19 +527,6 @@ def _execute_analyst_sql(sql: str, max_rows: int) -> List[Dict[str, Any]]:
         conn.close()
 
 
-def _conversational_data_addendum(raw_data: List[Dict[str, Any]]) -> str:
-    """Resumen conversacional breve de la evidencia tabular devuelta por Synapse."""
-    if not raw_data:
-        return ""
-    cols = list(raw_data[0].keys()) if isinstance(raw_data[0], dict) else []
-    col_preview = ", ".join(cols[:8]) + ("..." if len(cols) > 8 else "")
-    return (
-        "Lectura rápida de los datos:\n"
-        f"- Synapse devolvió {len(raw_data)} filas con {len(cols)} columnas.\n"
-        f"- Columnas principales: {col_preview}."
-    )
-
-
 def call_cortex_analyst_api(
     user_query: str,
     history: List[Dict[str, str]],
@@ -653,14 +640,6 @@ def process_with_cortex_analyst(
             raw_data = _execute_analyst_sql(sql_statement, max_rows=max_rows)
             if raw_data:
                 render_type = "table"
-                if os.getenv("SYNAPSE_ANALYST_APPEND_DATA_SUMMARY", "true").strip().lower() in (
-                    "1",
-                    "true",
-                    "yes",
-                ):
-                    extra_summary = _conversational_data_addendum(raw_data)
-                    if extra_summary:
-                        narrative = f"{narrative}\n\n{extra_summary}".strip()
         except Exception as e:
             narrative = (
                 f"{narrative}\n\n---\nNo se pudo ejecutar el SQL generado: {e}"
