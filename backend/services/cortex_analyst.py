@@ -42,6 +42,13 @@ def _fallback_to_analyst_enabled() -> bool:
     )
 
 
+def _fallback_mode() -> str:
+    mode = os.getenv("CORTEX_AGENT_FALLBACK_MODE", "content_or_error").strip().lower()
+    if mode not in ("content_or_error", "error_only"):
+        return "content_or_error"
+    return mode
+
+
 def _build_messages(user_query: str, history: List[Dict[str, str]]) -> List[Dict[str, Any]]:
     """Cortex Analyst: prioriza pregunta actual y aplica guardrails de periodo explícito."""
     period_hint = _explicit_period_hint(user_query)
@@ -640,6 +647,7 @@ def validate_cortex_analyst_config() -> Dict[str, Any]:
         "rest_base_url": rest,
         "mode": mode,
         "fallback_to_analyst": _fallback_to_analyst_enabled(),
+        "fallback_mode": _fallback_mode(),
         "endpoint": _endpoint_path(),
         "errors": errors,
     }
@@ -655,24 +663,76 @@ def process_with_cortex_analyst(
 ) -> SynapseResponse:
     mode = _cortex_api_mode()
     effective_mode = mode
-    body = call_cortex_analyst_api(
-        query,
-        history,
-        agent_thread_id=agent_thread_id,
-        agent_parent_message_id=agent_parent_message_id,
-    )
+    body: Dict[str, Any] = {}
+    agent_body: Optional[Dict[str, Any]] = None
+    agent_last_mid: Optional[int] = None
+    fallback_reason: Optional[str] = None
+
     if mode == "agent_run":
-        narrative, sql_statement, warnings, extra = _parse_agent_run_body(body)
-        if _fallback_to_analyst_enabled() and _needs_analyst_fallback(narrative, sql_statement):
+        try:
             body = call_cortex_analyst_api(
                 query,
                 history,
                 agent_thread_id=agent_thread_id,
                 agent_parent_message_id=agent_parent_message_id,
-                force_mode="analyst",
             )
+            agent_body = body
+        except Exception:
+            if _fallback_to_analyst_enabled() and _fallback_mode() in (
+                "error_only",
+                "content_or_error",
+            ):
+                body = call_cortex_analyst_api(
+                    query,
+                    history,
+                    agent_thread_id=agent_thread_id,
+                    agent_parent_message_id=agent_parent_message_id,
+                    force_mode="analyst",
+                )
+                effective_mode = "analyst_fallback"
+                fallback_reason = "agent_error"
+            else:
+                raise
+    else:
+        body = call_cortex_analyst_api(
+            query,
+            history,
+            agent_thread_id=agent_thread_id,
+            agent_parent_message_id=agent_parent_message_id,
+        )
+
+    if mode == "agent_run":
+        if effective_mode == "analyst_fallback":
             narrative, sql_statement, warnings, extra = _parse_analyst_body(body)
-            effective_mode = "analyst_fallback"
+        else:
+            narrative, sql_statement, warnings, extra = _parse_agent_run_body(body)
+            if (
+                _fallback_to_analyst_enabled()
+                and _fallback_mode() == "content_or_error"
+                and _needs_analyst_fallback(narrative, sql_statement)
+            ):
+                agent_narrative = narrative
+                agent_sql_statement = sql_statement
+                agent_warnings = warnings
+                agent_extra = extra
+                analyst_body = call_cortex_analyst_api(
+                    query,
+                    history,
+                    agent_thread_id=agent_thread_id,
+                    agent_parent_message_id=agent_parent_message_id,
+                    force_mode="analyst",
+                )
+                narrative, sql_statement, warnings, extra = _parse_analyst_body(analyst_body)
+                # Si Analyst no mejora la respuesta, conserva la salida original del Agent.
+                if not narrative and not sql_statement:
+                    narrative = agent_narrative
+                    sql_statement = agent_sql_statement
+                    warnings = agent_warnings
+                    extra = agent_extra
+                else:
+                    body = analyst_body
+                    effective_mode = "analyst_fallback"
+                    fallback_reason = "agent_low_information"
     else:
         narrative, sql_statement, warnings, extra = _parse_analyst_body(body)
 
@@ -709,6 +769,18 @@ def process_with_cortex_analyst(
     if raw_data is not None:
         meta_extra["returned_rows"] = len(raw_data)
     meta_extra["effective_mode"] = effective_mode
+    if fallback_reason:
+        meta_extra["fallback_reason"] = fallback_reason
+
+    if mode == "agent_run" and agent_body is not None and agent_thread_id is not None:
+        agent_last_mid = _extract_assistant_message_id_from_agent_response(agent_body)
+        if agent_last_mid is None:
+            from services.cortex_threads import last_assistant_message_id
+
+            agent_last_mid = last_assistant_message_id(agent_thread_id)
+        if agent_last_mid is not None:
+            meta_extra["last_assistant_message_id"] = agent_last_mid
+            meta_extra["agent_last_assistant_message_id"] = agent_last_mid
 
     if (
         effective_mode == "agent_run"
