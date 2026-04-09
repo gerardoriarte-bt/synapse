@@ -31,4 +31,6 @@ export interface SynapseResponse {
   decision_meta?: DecisionMeta;
   /** Presente si el backend usa modo Cortex Analyst */
   cortex_analyst?: Record<string, unknown>;
+  /** Reenviar en el siguiente ask para continuar el hilo Cortex Agent */
+  conversation_id?: string;
 }

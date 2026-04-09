@@ -1,4 +1,4 @@
-from sqlalchemy import create_engine, Column, String, Text, DateTime, JSON
+from sqlalchemy import create_engine, Column, String, Text, DateTime, JSON, BigInteger
 from sqlalchemy.orm import sessionmaker, declarative_base
 import datetime
 import os
@@ -35,6 +35,21 @@ class Conversation(Base):
     chart_config = Column(JSON, nullable=True)
     raw_data = Column(JSON, nullable=True)
     created_at = Column(DateTime, default=datetime.datetime.utcnow)
+
+
+class CortexSession(Base):
+    """Estado de hilo Cortex Agent por sesión de chat (conversation_id del cliente)."""
+
+    __tablename__ = "cortex_sessions"
+    id = Column(String, primary_key=True, index=True)
+    user_id = Column(String, index=True)
+    tenant_id = Column(String, index=True, nullable=True)
+    cortex_thread_id = Column(BigInteger, nullable=False)
+    last_assistant_message_id = Column(BigInteger, nullable=True)
+    created_at = Column(DateTime, default=datetime.datetime.utcnow)
+    updated_at = Column(
+        DateTime, default=datetime.datetime.utcnow, onupdate=datetime.datetime.utcnow
+    )
 
 
 def init_db():

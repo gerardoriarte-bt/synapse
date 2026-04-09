@@ -1,7 +1,7 @@
 from fastapi import FastAPI, HTTPException, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from services.snowflake import SnowflakeService
 from services.cortex_analyst import process_with_cortex_analyst, validate_cortex_analyst_config
 from database.database import get_db
@@ -10,6 +10,10 @@ from dotenv import load_dotenv
 import uuid
 import os
 import json
+from typing import Optional
+
+from database.repositories.cortex_session_repository import CortexSessionRepository
+from services.cortex_threads import create_cortex_thread
 
 load_dotenv()
 
@@ -33,6 +37,10 @@ class QueryRequest(BaseModel):
     query: str
     tenant_id: str
     user_id: str = "default_user"
+    conversation_id: Optional[str] = Field(
+        None,
+        description="Reenviar desde la respuesta anterior para continuar el hilo Cortex Agent.",
+    )
 
 
 def to_json_compatible(value):
@@ -130,7 +138,57 @@ async def ask_synapse(request: QueryRequest, db: Session = Depends(get_db)):
 
         mode = os.getenv("SYNAPSE_QUERY_MODE", "legacy").strip().lower()
         if mode == "cortex_analyst":
-            response = process_with_cortex_analyst(request.query, history)
+            api_mode = os.getenv("CORTEX_API_MODE", "analyst").strip().lower()
+            use_threads = (
+                os.getenv("CORTEX_USE_AGENT_THREADS", "true").strip().lower()
+                in ("1", "true", "yes")
+                and api_mode == "agent_run"
+            )
+            if use_threads:
+                repo = CortexSessionRepository(db)
+                out_conversation_id: Optional[str] = None
+                agent_thread_id: Optional[int] = None
+                agent_parent_message_id: Optional[int] = None
+                if request.conversation_id:
+                    out_conversation_id = request.conversation_id
+                    sess = repo.get(request.conversation_id)
+                    if not sess or sess.user_id != request.user_id:
+                        raise HTTPException(
+                            status_code=400,
+                            detail="conversation_id inválido o expirado.",
+                        )
+                    agent_thread_id = int(sess.cortex_thread_id)
+                    if sess.last_assistant_message_id is None:
+                        agent_parent_message_id = 0
+                    else:
+                        agent_parent_message_id = int(sess.last_assistant_message_id)
+                else:
+                    out_conversation_id = str(uuid.uuid4())
+                    tid = create_cortex_thread()
+                    repo.create(
+                        session_id=out_conversation_id,
+                        user_id=request.user_id,
+                        tenant_id=request.tenant_id,
+                        cortex_thread_id=tid,
+                    )
+                    agent_thread_id = tid
+                    agent_parent_message_id = 0
+                response = process_with_cortex_analyst(
+                    request.query,
+                    history,
+                    agent_thread_id=agent_thread_id,
+                    agent_parent_message_id=agent_parent_message_id,
+                    conversation_id=out_conversation_id,
+                )
+                last_mid = None
+                if response.cortex_analyst and isinstance(
+                    response.cortex_analyst, dict
+                ):
+                    last_mid = response.cortex_analyst.get("last_assistant_message_id")
+                if isinstance(last_mid, int) and out_conversation_id:
+                    repo.update_last_assistant(out_conversation_id, last_mid)
+            else:
+                response = process_with_cortex_analyst(request.query, history)
         else:
             agent = SnowflakeService(tenant_id=request.tenant_id)
             response = agent.process_query(request.query, history=history)

@@ -14,33 +14,8 @@ from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
 from models.synapse import DecisionMeta, SynapseResponse
+from services.cortex_http import auth_headers, rest_base_url
 from services.snowflake import connect_snowflake
-
-
-def _rest_base_url() -> str:
-    base = os.getenv("SNOWFLAKE_REST_BASE_URL", "").strip().rstrip("/")
-    if base:
-        return base
-    acct = os.getenv("SNOWFLAKE_ACCOUNT", "").strip()
-    if not acct:
-        raise ValueError(
-            "Define SNOWFLAKE_REST_BASE_URL (recomendado, ej. https://xyz.us-east-1.aws.snowflakecomputing.com) "
-            "o SNOWFLAKE_ACCOUNT para derivar https://<cuenta>.snowflakecomputing.com"
-        )
-    return f"https://{acct.lower()}.snowflakecomputing.com"
-
-
-def _auth_headers() -> Dict[str, str]:
-    token = os.getenv("SNOWFLAKE_TOKEN", "").strip()
-    if not token:
-        raise ValueError("SNOWFLAKE_TOKEN es obligatorio para Cortex Analyst REST (PAT).")
-    headers = {
-        "Authorization": f"Bearer {token}",
-        "Content-Type": "application/json",
-        "Accept": "application/json",
-        "X-Snowflake-Authorization-Token-Type": "PROGRAMMATIC_ACCESS_TOKEN",
-    }
-    return headers
 
 
 def _cortex_api_mode() -> str:
@@ -72,28 +47,74 @@ def _build_messages(user_query: str, history: List[Dict[str, str]]) -> List[Dict
     return [{"role": "user", "content": [{"type": "text", "text": text}]}]
 
 
-def _agent_run_payload(user_query: str, history: List[Dict[str, str]]) -> Dict[str, Any]:
-    payload: Dict[str, Any] = {
+def _merge_agent_run_config_extra() -> Dict[str, Any]:
+    extra = os.getenv("CORTEX_AGENT_RUN_CONFIG_JSON", "").strip()
+    if not extra:
+        return {}
+    try:
+        parsed = json.loads(extra)
+    except json.JSONDecodeError as e:
+        raise ValueError(f"CORTEX_AGENT_RUN_CONFIG_JSON no es JSON válido: {e}") from e
+    if not isinstance(parsed, dict):
+        raise ValueError("CORTEX_AGENT_RUN_CONFIG_JSON debe ser un objeto JSON.")
+    return parsed
+
+
+def _agent_run_payload(
+    user_query: str,
+    history: List[Dict[str, str]],
+    *,
+    agent_thread_id: Optional[int] = None,
+    agent_parent_message_id: Optional[int] = None,
+) -> Dict[str, Any]:
+    """
+    Con hilo Cortex (thread_id + parent_message_id): un solo mensaje usuario por request
+    (el historial vive en Snowflake). Sin hilo: historial compactado en el texto.
+    """
+    extra_cfg = _merge_agent_run_config_extra()
+    if agent_thread_id is not None and agent_parent_message_id is not None:
+        payload: Dict[str, Any] = {**extra_cfg}
+        payload["thread_id"] = agent_thread_id
+        payload["parent_message_id"] = agent_parent_message_id
+        payload["messages"] = [
+            {"role": "user", "content": [{"type": "text", "text": user_query}]},
+        ]
+        payload["stream"] = False
+        return payload
+
+    payload = {
+        **extra_cfg,
         "messages": _build_messages(user_query, history),
         "stream": False,
     }
+    payload["messages"] = _build_messages(user_query, history)
+    payload["stream"] = False
     thread_id = os.getenv("CORTEX_AGENT_THREAD_ID", "").strip()
     parent_message_id = os.getenv("CORTEX_AGENT_PARENT_MESSAGE_ID", "").strip()
     if thread_id and parent_message_id:
         payload["thread_id"] = int(thread_id)
         payload["parent_message_id"] = int(parent_message_id)
-    extra = os.getenv("CORTEX_AGENT_RUN_CONFIG_JSON", "").strip()
-    if extra:
-        try:
-            parsed = json.loads(extra)
-        except json.JSONDecodeError as e:
-            raise ValueError(f"CORTEX_AGENT_RUN_CONFIG_JSON no es JSON válido: {e}") from e
-        if not isinstance(parsed, dict):
-            raise ValueError("CORTEX_AGENT_RUN_CONFIG_JSON debe ser un objeto JSON.")
-        payload.update(parsed)
-        payload["messages"] = _build_messages(user_query, history)
-        payload["stream"] = False
     return payload
+
+
+def _extract_assistant_message_id_from_agent_response(body: Dict[str, Any]) -> Optional[int]:
+    meta = body.get("metadata")
+    if isinstance(meta, dict):
+        mid = meta.get("message_id")
+        if isinstance(mid, int):
+            return mid
+    mid = body.get("message_id")
+    if isinstance(mid, int):
+        return mid
+    msg = body.get("message")
+    if isinstance(msg, dict):
+        mid = msg.get("message_id")
+        if isinstance(mid, int):
+            return mid
+        nested = msg.get("metadata")
+        if isinstance(nested, dict) and isinstance(nested.get("message_id"), int):
+            return nested["message_id"]
+    return None
 
 
 def _semantic_payload() -> Dict[str, Any]:
@@ -261,11 +282,19 @@ def _execute_analyst_sql(sql: str, max_rows: int) -> List[Dict[str, Any]]:
 def call_cortex_analyst_api(
     user_query: str,
     history: List[Dict[str, str]],
+    *,
+    agent_thread_id: Optional[int] = None,
+    agent_parent_message_id: Optional[int] = None,
 ) -> Dict[str, Any]:
     mode = _cortex_api_mode()
-    url = f"{_rest_base_url()}{_endpoint_path()}"
+    url = f"{rest_base_url()}{_endpoint_path()}"
     if mode == "agent_run":
-        payload = _agent_run_payload(user_query, history)
+        payload = _agent_run_payload(
+            user_query,
+            history,
+            agent_thread_id=agent_thread_id,
+            agent_parent_message_id=agent_parent_message_id,
+        )
     else:
         payload = {
             "messages": _build_messages(user_query, history),
@@ -273,7 +302,7 @@ def call_cortex_analyst_api(
             "stream": False,
         }
     data = json.dumps(payload).encode("utf-8")
-    req = Request(url, data=data, method="POST", headers=_auth_headers())
+    req = Request(url, data=data, method="POST", headers=auth_headers())
     try:
         with urlopen(req, timeout=int(os.getenv("CORTEX_ANALYST_TIMEOUT_SEC", "120"))) as resp:
             raw = resp.read().decode("utf-8")
@@ -290,11 +319,11 @@ def validate_cortex_analyst_config() -> Dict[str, Any]:
     errors: List[str] = []
     rest = None
     try:
-        rest = _rest_base_url()
+        rest = rest_base_url()
     except Exception as e:
         errors.append(f"URL REST: {e}")
     try:
-        _auth_headers()
+        auth_headers()
     except Exception as e:
         errors.append(f"Token: {e}")
     mode = _cortex_api_mode()
@@ -324,8 +353,17 @@ def validate_cortex_analyst_config() -> Dict[str, Any]:
 def process_with_cortex_analyst(
     query: str,
     history: List[Dict[str, str]],
+    *,
+    agent_thread_id: Optional[int] = None,
+    agent_parent_message_id: Optional[int] = None,
+    conversation_id: Optional[str] = None,
 ) -> SynapseResponse:
-    body = call_cortex_analyst_api(query, history)
+    body = call_cortex_analyst_api(
+        query,
+        history,
+        agent_thread_id=agent_thread_id,
+        agent_parent_message_id=agent_parent_message_id,
+    )
     mode = _cortex_api_mode()
     if mode == "agent_run":
         narrative, sql_statement, warnings, extra = _parse_agent_run_body(body)
@@ -362,6 +400,19 @@ def process_with_cortex_analyst(
     if sql_statement:
         meta_extra["generated_sql"] = sql_statement
 
+    if (
+        mode == "agent_run"
+        and agent_thread_id is not None
+        and agent_parent_message_id is not None
+    ):
+        last_mid = _extract_assistant_message_id_from_agent_response(body)
+        if last_mid is None:
+            from services.cortex_threads import last_assistant_message_id
+
+            last_mid = last_assistant_message_id(agent_thread_id)
+        if last_mid is not None:
+            meta_extra["last_assistant_message_id"] = last_mid
+
     decision_meta = DecisionMeta(
         intent="cortex_agent" if mode == "agent_run" else "cortex_analyst",
         confidence_score=0.75 if sql_statement else 0.4,
@@ -383,4 +434,5 @@ def process_with_cortex_analyst(
         raw_data=raw_data,
         decision_meta=decision_meta,
         cortex_analyst=meta_extra,
+        conversation_id=conversation_id,
     )
