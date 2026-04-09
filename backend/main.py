@@ -2,7 +2,6 @@ from fastapi import FastAPI, HTTPException, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
 from pydantic import BaseModel, Field
-from services.snowflake import SnowflakeService
 from services.cortex_analyst import process_with_cortex_analyst, validate_cortex_analyst_config
 from database.database import get_db
 from database.models import Conversation, init_db
@@ -16,6 +15,22 @@ from database.repositories.cortex_session_repository import CortexSessionReposit
 from services.cortex_threads import create_cortex_thread
 
 load_dotenv()
+
+
+def _query_mode() -> str:
+    m = os.getenv("SYNAPSE_QUERY_MODE", "cortex_analyst").strip().lower()
+    if m not in ("cortex_analyst", "legacy"):
+        return "cortex_analyst"
+    return m
+
+
+def _legacy_allowed() -> bool:
+    return os.getenv("SYNAPSE_ALLOW_LEGACY", "false").strip().lower() in (
+        "1",
+        "true",
+        "yes",
+    )
+
 
 app = FastAPI(title="Synapse API")
 
@@ -119,7 +134,7 @@ async def snowflake_health():
 @app.get("/api/health/cortex-analyst")
 async def cortex_analyst_health():
     """Valida configuración de Cortex Analyst (sin consumir la API de inferencia)."""
-    mode = os.getenv("SYNAPSE_QUERY_MODE", "legacy").strip().lower()
+    mode = _query_mode()
     if mode != "cortex_analyst":
         return {"mode": mode, "cortex_analyst_configured": False}
     v = validate_cortex_analyst_config()
@@ -136,7 +151,17 @@ async def ask_synapse(request: QueryRequest, db: Session = Depends(get_db)):
 
         history = [{"q": c.query, "a": c.narrative} for c in reversed(past_interactions)]
 
-        mode = os.getenv("SYNAPSE_QUERY_MODE", "legacy").strip().lower()
+        mode = _query_mode()
+        if mode == "legacy" and not _legacy_allowed():
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    "Este despliegue está configurado para usar solo Snowflake Cortex (API REST). "
+                    "No está habilitado el motor legacy en Python (SQL + narrativa generados en código). "
+                    "Mantén SYNAPSE_QUERY_MODE=cortex_analyst. "
+                    "Solo en entornos de desarrollo explícitos: SYNAPSE_ALLOW_LEGACY=true."
+                ),
+            )
         if mode == "cortex_analyst":
             api_mode = os.getenv("CORTEX_API_MODE", "analyst").strip().lower()
             use_threads = (
@@ -190,6 +215,8 @@ async def ask_synapse(request: QueryRequest, db: Session = Depends(get_db)):
             else:
                 response = process_with_cortex_analyst(request.query, history)
         else:
+            from services.snowflake import SnowflakeService
+
             agent = SnowflakeService(tenant_id=request.tenant_id)
             response = agent.process_query(request.query, history=history)
 
