@@ -161,16 +161,14 @@ def _parse_analyst_body(body: Dict[str, Any]) -> Tuple[str, Optional[str], List[
             if c.get("confidence") is not None:
                 extra["sql_confidence"] = c.get("confidence")
         elif ct == "suggestion":
-            sug = c.get("suggestions")
-            narrative_parts.append(f"Sugerencias del modelo: {sug}")
+            # En modo passthrough no inyectamos sugerencias al texto principal.
+            pass
 
     narrative = "\n\n".join(p for p in narrative_parts if p).strip()
     warnings_list: List[str] = []
     for w in body.get("warnings") or []:
         if isinstance(w, dict) and w.get("message"):
             warnings_list.append(str(w["message"]))
-    if warnings_list:
-        narrative = (narrative + "\n\n---\nAvisos:\n" + "\n".join(f"- {x}" for x in warnings_list)).strip()
 
     if body.get("semantic_model_selection") is not None:
         extra["semantic_model_selection"] = body["semantic_model_selection"]

@@ -39,6 +39,18 @@ export const IntelligenceDashboard: React.FC<Props> = ({ data, isLoading }) => {
     </div>
   );
 
+  const isCortexPassthrough = Boolean(data.cortex_analyst);
+  if (isCortexPassthrough) {
+    return (
+      <div className="space-y-6 animate-in fade-in duration-700">
+        <section className="rounded-xl border border-zinc-800/70 bg-zinc-950/40 p-5">
+          <p className="whitespace-pre-wrap text-zinc-100 leading-relaxed">{data.narrative}</p>
+        </section>
+        {data.chart_config && <ChartModule config={data.chart_config} data={data.raw_data} />}
+      </div>
+    );
+  }
+
   const executiveHeadline = buildExecutiveHeadline(
     data.narrative,
     'Lectura ejecutiva disponible para apoyar la priorización del negocio.'
