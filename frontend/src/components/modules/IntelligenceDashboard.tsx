@@ -2,6 +2,7 @@ import React from 'react';
 import { TrendingUp, AlertTriangle, Lightbulb, BarChart3 } from 'lucide-react';
 import { SynapseResponse } from '@/types/synapse';
 import { ChartModule } from './ChartModule';
+import { TableModule } from './TableModule';
 import { StructuredNarrative } from '@/components/shared/StructuredNarrative';
 import { ExecutiveSummaryCard } from '@/components/shared/ExecutiveSummaryCard';
 import { ComparisonCards } from '@/components/shared/ComparisonCards';
@@ -12,6 +13,7 @@ import {
   buildExecutiveHeadline,
   buildLimitations,
 } from '@/lib/insight-utils';
+import { inferChartConfigFromRawData } from '@/lib/chart-inference';
 
 interface Props {
   data: SynapseResponse | null;
@@ -40,13 +42,15 @@ export const IntelligenceDashboard: React.FC<Props> = ({ data, isLoading }) => {
   );
 
   const isCortexPassthrough = Boolean(data.cortex_analyst);
+  const smartChartConfig = data.chart_config ?? inferChartConfigFromRawData(data.raw_data);
   if (isCortexPassthrough) {
     return (
       <div className="space-y-6 animate-in fade-in duration-700">
         <section className="rounded-xl border border-zinc-800/70 bg-zinc-950/40 p-5">
           <p className="whitespace-pre-wrap text-zinc-100 leading-relaxed">{data.narrative}</p>
         </section>
-        {data.chart_config && <ChartModule config={data.chart_config} data={data.raw_data} />}
+        {smartChartConfig && <ChartModule config={smartChartConfig} data={data.raw_data} />}
+        {data.raw_data && data.raw_data.length > 0 && <TableModule data={data.raw_data} />}
       </div>
     );
   }
@@ -93,7 +97,7 @@ export const IntelligenceDashboard: React.FC<Props> = ({ data, isLoading }) => {
             </div>
           </div>
           <div className="h-[280px] relative z-10">
-             {data.chart_config && <ChartModule config={data.chart_config} data={data.raw_data} />}
+             {smartChartConfig && <ChartModule config={smartChartConfig} data={data.raw_data} />}
           </div>
         </div>
       </div>

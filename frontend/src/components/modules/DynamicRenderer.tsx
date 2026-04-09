@@ -8,6 +8,7 @@ import { StructuredNarrative } from '@/components/shared/StructuredNarrative';
 import { ExecutiveSummaryCard } from '@/components/shared/ExecutiveSummaryCard';
 import { ComparisonCards } from '@/components/shared/ComparisonCards';
 import { EvidencePanels } from '@/components/shared/EvidencePanels';
+import { inferChartConfigFromRawData } from '@/lib/chart-inference';
 import {
   buildComparisonCards,
   buildEvidenceSnapshot,
@@ -21,6 +22,7 @@ interface Props {
 
 export const DynamicRenderer: React.FC<Props> = ({ data }) => {
   const { narrative, render_type, chart_config, raw_data, response_id, decision_meta } = data;
+  const inferredChartConfig = chart_config ?? inferChartConfigFromRawData(raw_data);
   const isCortexPassthrough = Boolean(data.cortex_analyst);
   const executiveHeadline = buildExecutiveHeadline(
     narrative,
@@ -33,15 +35,18 @@ export const DynamicRenderer: React.FC<Props> = ({ data }) => {
   const renderModule = () => {
     switch (render_type) {
       case 'chart':
-        return chart_config ? (
-          <ChartModule config={chart_config} data={raw_data} />
+        return inferredChartConfig ? (
+          <ChartModule config={inferredChartConfig} data={raw_data} />
         ) : (
           <RenderError message="Faltan datos de configuración para el gráfico." />
         );
 
       case 'table':
         return raw_data ? (
-          <TableModule data={raw_data} />
+          <div className="space-y-4">
+            {inferredChartConfig && <ChartModule config={inferredChartConfig} data={raw_data} />}
+            <TableModule data={raw_data} />
+          </div>
         ) : (
           <RenderError message="Faltan datos para renderizar la tabla." />
         );
