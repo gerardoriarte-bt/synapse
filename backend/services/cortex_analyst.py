@@ -11,6 +11,7 @@ import os
 import uuid
 import calendar
 import re
+from datetime import date, datetime, timedelta
 from typing import Any, Dict, List, Optional, Tuple
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
@@ -41,9 +42,10 @@ def _build_messages(user_query: str, history: List[Dict[str, str]]) -> List[Dict
         "- Responde exactamente la pregunta del usuario.\n"
         "- Si el usuario define periodo (mes/año/rango), filtra SOLO ese periodo.\n"
         "- No amplíes fechas ni agregues periodos adicionales.\n"
+        "- Para periodos de campañas, aplica el filtro temporal sobre la columna de fecha del modelo.\n"
     )
     if period_hint:
-        strict += f"- Periodo requerido detectado: {period_hint}\n"
+        strict += f"- {period_hint}\n"
 
     include_history = os.getenv("CORTEX_INCLUDE_HISTORY", "false").strip().lower() in (
         "1",
@@ -66,9 +68,18 @@ def _build_messages(user_query: str, history: List[Dict[str, str]]) -> List[Dict
     return [{"role": "user", "content": [{"type": "text", "text": text}]}]
 
 
-def _explicit_period_hint(query: str) -> Optional[str]:
-    q = (query or "").lower()
-    month_map = {
+def _parse_date_token(token: str) -> Optional[date]:
+    s = (token or "").strip()
+    for fmt in ("%Y-%m-%d", "%d/%m/%Y", "%d-%m-%Y", "%Y/%m/%d"):
+        try:
+            return datetime.strptime(s, fmt).date()
+        except ValueError:
+            continue
+    return None
+
+
+def _month_name_map() -> Dict[str, int]:
+    return {
         "enero": 1,
         "febrero": 2,
         "marzo": 3,
@@ -96,24 +107,159 @@ def _explicit_period_hint(query: str) -> Optional[str]:
         "december": 12,
     }
 
-    for name, month in month_map.items():
+
+def _month_bounds(year: int, month: int) -> Tuple[date, date]:
+    end_day = calendar.monthrange(year, month)[1]
+    return date(year, month, 1), date(year, month, end_day)
+
+
+def _add_months(d: date, delta: int) -> date:
+    month_idx = d.year * 12 + (d.month - 1) + delta
+    y = month_idx // 12
+    m = month_idx % 12 + 1
+    day = min(d.day, calendar.monthrange(y, m)[1])
+    return date(y, m, day)
+
+
+def _quarter_bounds(year: int, q: int) -> Tuple[date, date]:
+    start_month = 1 + (q - 1) * 3
+    start = date(year, start_month, 1)
+    end_month = start_month + 2
+    end_day = calendar.monthrange(year, end_month)[1]
+    return start, date(year, end_month, end_day)
+
+
+def _infer_period_bounds(query: str, today: Optional[date] = None) -> Optional[Tuple[date, date, str]]:
+    q = (query or "").lower()
+    now = today or datetime.utcnow().date()
+
+    # 1) Rangos explícitos entre dos fechas
+    date_pat = r"(20\d{2}-\d{2}-\d{2}|\d{1,2}[/-]\d{1,2}[/-]20\d{2}|20\d{2}/\d{2}/\d{2})"
+    m = re.search(rf"{date_pat}.*?{date_pat}", q)
+    if m:
+        d1 = _parse_date_token(m.group(1))
+        d2 = _parse_date_token(m.group(2))
+        if d1 and d2:
+            start, end = (d1, d2) if d1 <= d2 else (d2, d1)
+            return start, end, f"rango explícito {start} a {end}"
+
+    # 2) Mes + año (diciembre 2025 / 2025 diciembre)
+    for name, month in _month_name_map().items():
         m1 = re.search(rf"\b{name}\b\s*(?:de\s*)?(20\d{{2}})\b", q)
         m2 = re.search(rf"\b(20\d{{2}})\b\s*(?:de\s*)?\b{name}\b", q)
-        year = None
-        if m1:
-            year = int(m1.group(1))
-        elif m2:
-            year = int(m2.group(1))
+        year = int(m1.group(1)) if m1 else (int(m2.group(1)) if m2 else None)
         if year:
-            start = f"{year:04d}-{month:02d}-01"
-            end_day = calendar.monthrange(year, month)[1]
-            end = f"{year:04d}-{month:02d}-{end_day:02d}"
-            return f"{start} a {end}"
+            start, end = _month_bounds(year, month)
+            return start, end, f"{name} {year}"
 
-    between = re.search(r"\b(20\d{2}-\d{2}-\d{2})\b.*\b(20\d{2}-\d{2}-\d{2})\b", q)
-    if between:
-        return f"{between.group(1)} a {between.group(2)}"
+    # 3) Trimestre (Q1 2025 / trimestre 1 2025 / primer trimestre 2025)
+    qm = re.search(r"\bq([1-4])\s*(20\d{2})\b", q)
+    if not qm:
+        qm = re.search(r"\btrimestre\s*([1-4])\s*(?:de\s*)?(20\d{2})\b", q)
+    if not qm:
+        ord_map = {"primer": 1, "primero": 1, "segundo": 2, "tercer": 3, "tercero": 3, "cuarto": 4}
+        for k, v in ord_map.items():
+            mo = re.search(rf"\b{k}\s+trimestre\s*(?:de\s*)?(20\d{{2}})\b", q)
+            if mo:
+                qm = (v, int(mo.group(1)))
+                break
+    if qm:
+        if isinstance(qm, tuple):
+            qn, year = qm
+        else:
+            qn, year = int(qm.group(1)), int(qm.group(2))
+        start, end = _quarter_bounds(year, int(qn))
+        return start, end, f"Q{qn} {year}"
+
+    # 4) Semestre
+    sm = re.search(r"\b(1|2)\s*semestre\s*(?:de\s*)?(20\d{2})\b", q)
+    if sm:
+        sem, year = int(sm.group(1)), int(sm.group(2))
+        if sem == 1:
+            return date(year, 1, 1), date(year, 6, 30), f"S1 {year}"
+        return date(year, 7, 1), date(year, 12, 31), f"S2 {year}"
+    if "primer semestre" in q or "1er semestre" in q:
+        y = re.search(r"(20\d{2})", q)
+        if y:
+            year = int(y.group(1))
+            return date(year, 1, 1), date(year, 6, 30), f"S1 {year}"
+    if "segundo semestre" in q:
+        y = re.search(r"(20\d{2})", q)
+        if y:
+            year = int(y.group(1))
+            return date(year, 7, 1), date(year, 12, 31), f"S2 {year}"
+
+    # 5) Relativos
+    m = re.search(r"\b(?:ultim[oa]s?|last)\s+(\d{1,3})\s+(d[ií]as?|days?)\b", q)
+    if m:
+        n = max(1, int(m.group(1)))
+        return now - timedelta(days=n - 1), now, f"últimos {n} días"
+    m = re.search(r"\b(?:ultim[oa]s?|last)\s+(\d{1,3})\s+(semanas?|weeks?)\b", q)
+    if m:
+        n = max(1, int(m.group(1)))
+        return now - timedelta(days=(7 * n) - 1), now, f"últimas {n} semanas"
+    m = re.search(r"\b(?:ultim[oa]s?|last)\s+(\d{1,3})\s+(meses?|months?)\b", q)
+    if m:
+        n = max(1, int(m.group(1)))
+        start = _add_months(date(now.year, now.month, 1), -(n - 1))
+        return start, now, f"últimos {n} meses"
+
+    # 6) Anclas comunes
+    if "esta semana" in q or "this week" in q or "wtd" in q:
+        start = now - timedelta(days=now.weekday())
+        return start, now, "semana actual"
+    if "semana pasada" in q or "last week" in q:
+        this_start = now - timedelta(days=now.weekday())
+        start = this_start - timedelta(days=7)
+        end = this_start - timedelta(days=1)
+        return start, end, "semana pasada"
+    if "este mes" in q or "this month" in q or "mtd" in q:
+        return date(now.year, now.month, 1), now, "mes actual"
+    if "mes pasado" in q or "last month" in q:
+        prev_anchor = _add_months(date(now.year, now.month, 1), -1)
+        start, end = _month_bounds(prev_anchor.year, prev_anchor.month)
+        return start, end, "mes pasado"
+    if "este año" in q or "this year" in q or "ytd" in q:
+        return date(now.year, 1, 1), now, "año actual"
+    if "año pasado" in q or "last year" in q:
+        y = now.year - 1
+        return date(y, 1, 1), date(y, 12, 31), "año pasado"
+    if "este trimestre" in q or "this quarter" in q or "qtd" in q:
+        cq = ((now.month - 1) // 3) + 1
+        start, _ = _quarter_bounds(now.year, cq)
+        return start, now, "trimestre actual"
+    if "trimestre pasado" in q or "last quarter" in q:
+        cq = ((now.month - 1) // 3) + 1
+        if cq == 1:
+            y, qn = now.year - 1, 4
+        else:
+            y, qn = now.year, cq - 1
+        start, end = _quarter_bounds(y, qn)
+        return start, end, "trimestre pasado"
+
+    # 7) Año puntual (en 2025 / año 2025)
+    years = sorted({int(x) for x in re.findall(r"\b(20\d{2})\b", q)})
+    if len(years) == 1 and any(k in q for k in ("en ", "año", "year", "durante")):
+        y = years[0]
+        return date(y, 1, 1), date(y, 12, 31), f"año {y}"
+    if re.search(r"\b(20\d{2})\s*(?:a|to|-)\s*(20\d{2})\b", q):
+        m = re.search(r"\b(20\d{2})\s*(?:a|to|-)\s*(20\d{2})\b", q)
+        if m:
+            y1, y2 = int(m.group(1)), int(m.group(2))
+            start_y, end_y = (y1, y2) if y1 <= y2 else (y2, y1)
+            return date(start_y, 1, 1), date(end_y, 12, 31), f"{start_y} a {end_y}"
     return None
+
+
+def _explicit_period_hint(query: str) -> Optional[str]:
+    inferred = _infer_period_bounds(query)
+    if not inferred:
+        return None
+    start, end, label = inferred
+    return (
+        f"Periodo requerido detectado ({label}): {start} a {end}. "
+        f"Aplica filtro temporal estricto en SQL: DATE >= '{start}' AND DATE <= '{end}'."
+    )
 
 
 def _merge_agent_run_config_extra() -> Dict[str, Any]:
