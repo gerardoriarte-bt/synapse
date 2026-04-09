@@ -25,11 +25,12 @@ def _cortex_api_mode() -> str:
     return os.getenv("CORTEX_API_MODE", "analyst").strip().lower()
 
 
-def _endpoint_path() -> str:
-    explicit = os.getenv("CORTEX_API_ENDPOINT", "").strip()
+def _endpoint_path(mode: Optional[str] = None, *, allow_explicit: bool = True) -> str:
+    resolved_mode = (mode or _cortex_api_mode()).strip().lower()
+    explicit = os.getenv("CORTEX_API_ENDPOINT", "").strip() if allow_explicit else ""
     if explicit:
         return explicit if explicit.startswith("/") else f"/{explicit}"
-    if _cortex_api_mode() == "agent_run":
+    if resolved_mode == "agent_run":
         return "/api/v2/cortex/agent:run"
     return "/api/v2/cortex/analyst/message"
 
@@ -612,10 +613,9 @@ def call_cortex_analyst_api(
     force_mode: Optional[str] = None,
 ) -> Dict[str, Any]:
     mode = (force_mode or _cortex_api_mode()).strip().lower()
-    endpoint = (
-        "/api/v2/cortex/agent:run"
-        if mode == "agent_run"
-        else "/api/v2/cortex/analyst/message"
+    endpoint = _endpoint_path(
+        mode,
+        allow_explicit=(force_mode is None and mode == _cortex_api_mode()),
     )
     url = f"{rest_base_url()}{endpoint}"
     try:
