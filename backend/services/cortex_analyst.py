@@ -292,18 +292,71 @@ def _merge_agent_run_config_extra() -> Dict[str, Any]:
     return parsed
 
 
+def _agent_payload_mode() -> str:
+    mode = os.getenv("CORTEX_AGENT_PAYLOAD_MODE", "messages").strip().lower()
+    if mode not in ("messages", "named_agent_query"):
+        return "messages"
+    return mode
+
+
+def _agent_query_payload_fallback_enabled() -> bool:
+    return os.getenv(
+        "CORTEX_AGENT_QUERY_PAYLOAD_FALLBACK_MESSAGES", "true"
+    ).strip().lower() in ("1", "true", "yes")
+
+
+def _agent_run_params_from_env() -> Dict[str, Any]:
+    params: Dict[str, Any] = {}
+    wh = os.getenv("SNOWFLAKE_WAREHOUSE", "").strip()
+    role = os.getenv("SNOWFLAKE_ROLE", "").strip()
+    if wh:
+        params["warehouse"] = wh
+    if role:
+        params["role"] = role
+    return params
+
+
 def _agent_run_payload(
     user_query: str,
     history: List[Dict[str, str]],
     *,
     agent_thread_id: Optional[int] = None,
     agent_parent_message_id: Optional[int] = None,
+    payload_mode: Optional[str] = None,
 ) -> Dict[str, Any]:
     """
     Con hilo Cortex (thread_id + parent_message_id): un solo mensaje usuario por request
     (el historial vive en Snowflake). Sin hilo: historial compactado en el texto.
     """
+    mode = payload_mode or _agent_payload_mode()
     extra_cfg = _merge_agent_run_config_extra()
+
+    if mode == "named_agent_query":
+        agent_name = os.getenv("SNOWFLAKE_AGENT_NAME", "").strip()
+        if not agent_name:
+            raise ValueError(
+                "CORTEX_AGENT_PAYLOAD_MODE=named_agent_query requiere SNOWFLAKE_AGENT_NAME."
+            )
+        payload: Dict[str, Any] = {
+            **extra_cfg,
+            "agent_name": agent_name,
+            "query": user_query,
+            "stream": False,
+        }
+        params = _agent_run_params_from_env()
+        if params:
+            payload["params"] = params
+        if agent_thread_id is not None and agent_parent_message_id is not None:
+            payload["thread_id"] = agent_thread_id
+            payload["parent_message_id"] = agent_parent_message_id
+        else:
+            thread_id = os.getenv("CORTEX_AGENT_THREAD_ID", "").strip()
+            parent_message_id = os.getenv("CORTEX_AGENT_PARENT_MESSAGE_ID", "").strip()
+            if thread_id and parent_message_id:
+                payload["thread_id"] = int(thread_id)
+                payload["parent_message_id"] = int(parent_message_id)
+        return payload
+
     if agent_thread_id is not None and agent_parent_message_id is not None:
         payload: Dict[str, Any] = {**extra_cfg}
         payload["thread_id"] = agent_thread_id
@@ -542,6 +595,14 @@ def _execute_analyst_sql(sql: str, max_rows: int) -> List[Dict[str, Any]]:
         conn.close()
 
 
+def _post_json(url: str, payload: Dict[str, Any]) -> Dict[str, Any]:
+    data = json.dumps(payload).encode("utf-8")
+    req = Request(url, data=data, method="POST", headers=auth_headers())
+    with urlopen(req, timeout=int(os.getenv("CORTEX_ANALYST_TIMEOUT_SEC", "120"))) as resp:
+        raw = resp.read().decode("utf-8")
+        return json.loads(raw)
+
+
 def call_cortex_analyst_api(
     user_query: str,
     history: List[Dict[str, str]],
@@ -557,25 +618,38 @@ def call_cortex_analyst_api(
         else "/api/v2/cortex/analyst/message"
     )
     url = f"{rest_base_url()}{endpoint}"
-    if mode == "agent_run":
-        payload = _agent_run_payload(
-            user_query,
-            history,
-            agent_thread_id=agent_thread_id,
-            agent_parent_message_id=agent_parent_message_id,
-        )
-    else:
+    try:
+        if mode == "agent_run":
+            payload_mode = _agent_payload_mode()
+            payload = _agent_run_payload(
+                user_query,
+                history,
+                agent_thread_id=agent_thread_id,
+                agent_parent_message_id=agent_parent_message_id,
+                payload_mode=payload_mode,
+            )
+            try:
+                return _post_json(url, payload)
+            except HTTPError:
+                if (
+                    payload_mode == "named_agent_query"
+                    and _agent_query_payload_fallback_enabled()
+                ):
+                    fallback_payload = _agent_run_payload(
+                        user_query,
+                        history,
+                        agent_thread_id=agent_thread_id,
+                        agent_parent_message_id=agent_parent_message_id,
+                        payload_mode="messages",
+                    )
+                    return _post_json(url, fallback_payload)
+                raise
         payload = {
             "messages": _build_messages(user_query, history),
             **_semantic_payload(),
             "stream": False,
         }
-    data = json.dumps(payload).encode("utf-8")
-    req = Request(url, data=data, method="POST", headers=auth_headers())
-    try:
-        with urlopen(req, timeout=int(os.getenv("CORTEX_ANALYST_TIMEOUT_SEC", "120"))) as resp:
-            raw = resp.read().decode("utf-8")
-            return json.loads(raw)
+        return _post_json(url, payload)
     except HTTPError as e:
         err_body = e.read().decode("utf-8", errors="replace") if e.fp else ""
         raise RuntimeError(f"Cortex Analyst HTTP {e.code}: {err_body or e.reason}") from e
@@ -631,6 +705,7 @@ def validate_cortex_analyst_config() -> Dict[str, Any]:
         errors.append(f"Token: {e}")
     mode = _cortex_api_mode()
     if mode == "agent_run":
+        payload_mode = _agent_payload_mode()
         extra = os.getenv("CORTEX_AGENT_RUN_CONFIG_JSON", "").strip()
         if extra:
             try:
@@ -639,6 +714,12 @@ def validate_cortex_analyst_config() -> Dict[str, Any]:
                     errors.append("CORTEX_AGENT_RUN_CONFIG_JSON debe ser objeto JSON.")
             except Exception as e:
                 errors.append(f"Agent run config: {e}")
+        if payload_mode == "named_agent_query" and not os.getenv(
+            "SNOWFLAKE_AGENT_NAME", ""
+        ).strip():
+            errors.append(
+                "SNOWFLAKE_AGENT_NAME es obligatorio cuando CORTEX_AGENT_PAYLOAD_MODE=named_agent_query."
+            )
         if _fallback_to_analyst_enabled():
             try:
                 _semantic_payload()
@@ -653,6 +734,7 @@ def validate_cortex_analyst_config() -> Dict[str, Any]:
         "ok": not errors,
         "rest_base_url": rest,
         "mode": mode,
+        "agent_payload_mode": _agent_payload_mode() if mode == "agent_run" else None,
         "fallback_to_analyst": _fallback_to_analyst_enabled(),
         "fallback_mode": _fallback_mode(),
         "endpoint": _endpoint_path(),
@@ -776,6 +858,8 @@ def process_with_cortex_analyst(
     if raw_data is not None:
         meta_extra["returned_rows"] = len(raw_data)
     meta_extra["effective_mode"] = effective_mode
+    if mode == "agent_run":
+        meta_extra["agent_payload_mode"] = _agent_payload_mode()
     if fallback_reason:
         meta_extra["fallback_reason"] = fallback_reason
 
