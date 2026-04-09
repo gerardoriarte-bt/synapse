@@ -158,6 +158,112 @@ class SnowflakeService:
             print(f"campaign inventory warning: {e}")
             return [], None
 
+    def _sanitize_campaign_search_token(self, raw: str) -> str:
+        """Token alfanumérico para LIKE (evita inyección en patrón)."""
+        s = re.sub(r"[^A-Za-z0-9_-]", "", (raw or "").strip())
+        return s.upper()[:64]
+
+    def _extract_named_campaign_token(self, query: str) -> Optional[str]:
+        """
+        Detecta un identificador de campaña en la pregunta (p. ej. SS26CLICKCLACK).
+        Orden: comillas, tras 'campaña/campaign', o token tipo SS26CLICKCLACK.
+        """
+        q = query.strip()
+        m = re.search(r"['\"]([A-Za-z0-9_\-]{4,})['\"]", q)
+        if m:
+            return self._sanitize_campaign_search_token(m.group(1)) or None
+        m = re.search(
+            r"(?:campaña|campaign|campa)\s*[:\s]+([A-Za-z0-9_\-]{4,})",
+            q,
+            re.IGNORECASE,
+        )
+        if m:
+            return self._sanitize_campaign_search_token(m.group(1)) or None
+        # Códigos tipo SS26CLICKCLACK (debe incluir dígito; evita matchear RESULTADOS, CAMPAIGN, etc.)
+        hits = re.findall(r"\b([A-Z]{2,}\d+[A-Z0-9]{2,})\b", query.upper())
+        for h in hits:
+            t = self._sanitize_campaign_search_token(h)
+            if t and any(c.isdigit() for c in t) and any(c.isalpha() for c in t):
+                return t
+        return None
+
+    def _wants_named_campaign_performance(self, query: str) -> bool:
+        """Métricas/resultados de una campaña concreta (nombre o código en el texto)."""
+        token = self._extract_named_campaign_token(query)
+        if not token or len(token) < 4:
+            return False
+        q = query.upper()
+        perf_keywords = (
+            "RESULTADO",
+            "ROAS",
+            "GASTO",
+            "COST",
+            "CLICK",
+            "IMPRESION",
+            "IMPRESI",
+            "CAMPAÑA",
+            "CAMPAIGN",
+            "CAMPANA",
+            "MÉTRICA",
+            "METRICA",
+            "PERFORMANCE",
+            "DESEMPE",
+            "RENDIMIENTO",
+            "INVERSI",
+            "INGRESO",
+            "REVENUE",
+            "CONVERSI",
+            "KPI",
+            "DATOS",
+            "INFORME",
+        )
+        return any(k in q for k in perf_keywords)
+
+    def _get_campaign_metrics_by_name(
+        self, cursor, token: str
+    ) -> Tuple[List[Dict], Optional[ChartConfig]]:
+        """
+        Filtra FCT_PERFORMANCE por CAMPAIGN_PRIMARIO que contenga el token (Gold).
+        Si no hay filas, la campaña no está bajo ese texto exacto en esa columna.
+        """
+        safe = self._sanitize_campaign_search_token(token)
+        if len(safe) < 4:
+            return [], None
+        pattern = f"%{safe}%"
+        try:
+            cursor.execute(
+                f"""
+                SELECT
+                    DATE,
+                    COALESCE(CAMPAIGN_PRIMARIO, 'SIN_CAMPAÑA')     AS CAMPAIGN_PRIMARIO,
+                    COALESCE(FUENTE, 'SIN_FUENTE')                  AS FUENTE,
+                    SUM(COALESCE(COST_USD, 0))                     AS GASTO_USD,
+                    SUM(COALESCE(CLICKS, 0))                       AS CLICKS,
+                    SUM(COALESCE(IMPRESSIONS, 0))                  AS IMPRESIONES,
+                    SUM(COALESCE(ORDENES_VENDIDAS, 0))             AS ORDENES,
+                    SUM(COALESCE(INGRESOS_USD, 0))                 AS INGRESOS_USD,
+                    ROUND(
+                        SUM(COALESCE(INGRESOS_USD, 0))
+                        / NULLIF(SUM(COALESCE(COST_USD, 0)), 0),
+                        4
+                    )                                              AS ROAS
+                FROM {self.gold_db}.{self.gold_schema}.FCT_PERFORMANCE
+                WHERE UPPER(COALESCE(CAMPAIGN_PRIMARIO, '')) LIKE UPPER(%s)
+                GROUP BY DATE, COALESCE(CAMPAIGN_PRIMARIO, 'SIN_CAMPAÑA'),
+                         COALESCE(FUENTE, 'SIN_FUENTE')
+                ORDER BY DATE DESC
+                LIMIT 400
+                """,
+                (pattern,),
+            )
+            rows = cursor.fetchall()
+            cols = [d[0] for d in cursor.description]
+            data = [dict(zip(cols, r)) for r in rows] if rows else []
+            return data, None
+        except Exception as e:
+            print(f"campaign by name warning: {e}")
+            return [], None
+
     def _wants_top_products(self, query: str) -> bool:
         q = query.upper()
         product_terms = ["PRODUCTO", "PRODUCTOS", "PRODUCT", "ITEM", "SKU"]
@@ -830,6 +936,20 @@ class SnowflakeService:
                 )
                 if raw_data:
                     ads_context += str(raw_data[:30])
+            elif self._wants_named_campaign_performance(query):
+                tok = self._extract_named_campaign_token(query) or ""
+                raw_data, chart_config = self._get_campaign_metrics_by_name(cursor, tok)
+                for r in raw_data:
+                    r["_source_dataset"] = "FCT_PERFORMANCE_CAMPAIGN_NAMED"
+                ads_context = (
+                    f"=== RESULTADOS FILTRADOS POR NOMBRE/CÓDIGO DE CAMPAÑA "
+                    f"('{tok}' en CAMPAIGN_PRIMARIO, Gold FCT_PERFORMANCE) ===\n"
+                    "Instrucción: el cliente pidió métricas de esta campaña. Usa solo estas filas; "
+                    "no mezcles con otras campañas. Si la lista está vacía, indica que no hay filas "
+                    "con ese texto en CAMPAIGN_PRIMARIO (revisar ortografía o nombre en Snowflake).\n"
+                )
+                if raw_data:
+                    ads_context += str(raw_data[:40])
             elif self._wants_top_products(query):
                 top_n = self._extract_top_n(query, default=5)
                 raw_data, chart_config = self._get_top_products_by_source(cursor, limit=top_n)
