@@ -382,6 +382,7 @@ def _parse_analyst_body(body: Dict[str, Any]) -> Tuple[str, Optional[str], List[
             pass
 
     narrative = "\n\n".join(p for p in narrative_parts if p).strip()
+    narrative = _sanitize_english_preamble(narrative)
     warnings_list: List[str] = []
     for w in body.get("warnings") or []:
         if isinstance(w, dict) and w.get("message"):
@@ -395,6 +396,24 @@ def _parse_analyst_body(body: Dict[str, Any]) -> Tuple[str, Optional[str], List[
         extra["request_id"] = body["request_id"]
 
     return narrative, sql_statement, warnings_list, extra
+
+
+def _sanitize_english_preamble(text: str) -> str:
+    """
+    Algunas respuestas de Analyst incluyen una cabecera en inglés no solicitada.
+    La removemos de forma conservadora para mantener salida en español.
+    """
+    if not text:
+        return text
+    cleaned = re.sub(
+        r"^\s*this is our interpretation of your question:\s*",
+        "",
+        text,
+        flags=re.IGNORECASE,
+    )
+    # Si quedó una línea en inglés tipo "Show ...", la mantenemos para no perder semántica,
+    # pero eliminamos doble salto al inicio.
+    return cleaned.lstrip()
 
 
 def _parse_agent_run_body(body: Dict[str, Any]) -> Tuple[str, Optional[str], List[str], Dict[str, Any]]:
