@@ -306,6 +306,15 @@ def _agent_query_payload_fallback_enabled() -> bool:
     ).strip().lower() in ("1", "true", "yes")
 
 
+def _is_agent_object_endpoint(endpoint: str) -> bool:
+    return bool(
+        re.match(
+            r"^/api/v2/databases/[^/]+/schemas/[^/]+/agents/[^/]+:run$",
+            (endpoint or "").strip(),
+        )
+    )
+
+
 def _agent_run_params_from_env() -> Dict[str, Any]:
     params: Dict[str, Any] = {}
     wh = os.getenv("SNOWFLAKE_WAREHOUSE", "").strip()
@@ -621,6 +630,9 @@ def call_cortex_analyst_api(
     try:
         if mode == "agent_run":
             payload_mode = _agent_payload_mode()
+            if payload_mode == "named_agent_query" and _is_agent_object_endpoint(endpoint):
+                # Agent Object endpoint espera `messages`; `query` no es válido aquí.
+                payload_mode = "messages"
             payload = _agent_run_payload(
                 user_query,
                 history,
