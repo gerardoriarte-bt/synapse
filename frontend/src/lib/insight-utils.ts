@@ -46,9 +46,10 @@ export const buildComparisonCards = (
   return mapping
     .map(({ id, title }) => {
       const entry = decisionMeta.comparisons?.[id];
-      if (!entry) return null;
+      if (!entry || typeof entry !== 'object') return null;
+      const entryObj = entry as Record<string, unknown>;
 
-      const status = String(entry.status || 'unavailable').toLowerCase();
+      const status = String(entryObj.status || 'unavailable').toLowerCase();
       const ok = status === 'ok';
 
       return {
@@ -56,7 +57,7 @@ export const buildComparisonCards = (
         title,
         statusLabel: ok ? 'Disponible' : 'No disponible',
         statusClass: ok ? 'text-emerald-300' : 'text-amber-300',
-        detail: entry.reason ? String(entry.reason) : null,
+        detail: entryObj.reason ? String(entryObj.reason) : null,
       };
     })
     .filter(Boolean) as ComparisonCard[];
@@ -101,8 +102,11 @@ export const buildLimitations = (decisionMeta?: SynapseResponse['decision_meta']
   const comparisons = decisionMeta.comparisons || {};
   for (const key of ['week_over_week', 'vs_target', 'vs_last_year']) {
     const value = comparisons[key];
-    if (value && String(value.status || '').toLowerCase() !== 'ok' && value.reason) {
-      limitations.push(String(value.reason));
+    if (value && typeof value === 'object') {
+      const valueObj = value as Record<string, unknown>;
+      if (String(valueObj.status || '').toLowerCase() !== 'ok' && valueObj.reason) {
+        limitations.push(String(valueObj.reason));
+      }
     }
   }
 
