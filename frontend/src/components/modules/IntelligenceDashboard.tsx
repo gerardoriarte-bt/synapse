@@ -1,8 +1,17 @@
 import React from 'react';
-import { TrendingUp, AlertTriangle, Lightbulb, ArrowUpRight, BarChart3 } from 'lucide-react';
+import { TrendingUp, AlertTriangle, Lightbulb, BarChart3 } from 'lucide-react';
 import { SynapseResponse } from '@/types/synapse';
 import { ChartModule } from './ChartModule';
 import { StructuredNarrative } from '@/components/shared/StructuredNarrative';
+import { ExecutiveSummaryCard } from '@/components/shared/ExecutiveSummaryCard';
+import { ComparisonCards } from '@/components/shared/ComparisonCards';
+import { EvidencePanels } from '@/components/shared/EvidencePanels';
+import {
+  buildComparisonCards,
+  buildEvidenceSnapshot,
+  buildExecutiveHeadline,
+  buildLimitations,
+} from '@/lib/insight-utils';
 
 interface Props {
   data: SynapseResponse | null;
@@ -23,37 +32,42 @@ export const IntelligenceDashboard: React.FC<Props> = ({ data, isLoading }) => {
       <div className="w-16 h-16 rounded-full bg-zinc-900 border border-zinc-800 flex items-center justify-center">
         <BarChart3 className="text-zinc-600" size={32} />
       </div>
-      <h2 className="text-xl font-bold text-white">No Intelligence Assets Found</h2>
-      <p className="text-zinc-500 max-w-sm font-medium italic">Pulsa &quot;Generate Insights&quot; para generar el pulso estratégico de marketing con Synapse.</p>
+      <h2 className="text-xl font-bold text-white">Sin lectura estratégica disponible</h2>
+      <p className="text-zinc-500 max-w-sm font-medium italic">
+        Realiza una consulta o reutiliza la última respuesta del chat para ver esta vista.
+      </p>
     </div>
   );
+
+  const executiveHeadline = buildExecutiveHeadline(
+    data.narrative,
+    'Lectura ejecutiva disponible para apoyar la priorización del negocio.'
+  );
+  const comparisons = buildComparisonCards(data.decision_meta);
+  const evidence = buildEvidenceSnapshot(data.raw_data);
+  const limitations = buildLimitations(data.decision_meta);
 
   return (
     <div className="space-y-10 animate-in fade-in duration-1000">
       <div className="flex justify-between items-end">
         <div>
-          <h2 className="text-3xl font-black tracking-tighter text-white uppercase italic">Strategic Insight Engine</h2>
-          <p className="text-zinc-500 font-bold text-xs uppercase tracking-[0.2em] mt-1">Marketing Intelligence · Synapse Analyst</p>
-        </div>
-        <div className="text-[10px] px-6 py-2 bg-indigo-500/10 border border-indigo-400/20 text-indigo-400 font-black rounded-full uppercase tracking-[0.3em] shadow-lg shadow-indigo-500/5">
-          Real-Time Analysis Enabled
+          <h2 className="text-3xl font-black tracking-tighter text-white uppercase italic">Lectura estratégica</h2>
+          <p className="mt-1 text-zinc-500 font-bold text-xs uppercase tracking-[0.2em]">
+            Marketing Intelligence · Synapse Analyst
+          </p>
         </div>
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-        <div className="bg-zinc-900/40 border border-zinc-800 p-8 rounded-[40px] space-y-6 relative overflow-hidden group backdrop-blur-md">
+        <div className="relative overflow-hidden rounded-[40px] bg-zinc-900/40 p-8 backdrop-blur-md">
           <div className="absolute top-0 right-0 p-6 opacity-5 group-hover:opacity-10 transition-opacity">
             <AlertTriangle size={80} className="text-amber-500" />
           </div>
-          <div className="flex items-center gap-3">
-             <div className="w-10 h-10 rounded-xl bg-amber-500/10 flex items-center justify-center border border-amber-500/20">
-               <AlertTriangle size={20} className="text-amber-500" />
-             </div>
-             <h3 className="text-[10px] font-black text-amber-500/80 uppercase tracking-widest">The Strategic Tension</h3>
-          </div>
-          <p className="text-sm font-bold text-zinc-300 leading-relaxed italic">
-            &quot;La volatilidad reciente en ROAS merece una lectura ejecutiva: revisa pacing por canal y alinea con el objetivo semanal.&quot;
-          </p>
+          <ExecutiveSummaryCard
+            headline={executiveHeadline}
+            eyebrowClassName="text-amber-500/80"
+            containerClassName="border-zinc-800 bg-transparent p-0"
+          />
         </div>
 
         <div className="lg:col-span-2 bg-[#050505] border border-zinc-800/60 rounded-[40px] p-8 space-y-4 shadow-2xl relative overflow-hidden group">
@@ -63,14 +77,34 @@ export const IntelligenceDashboard: React.FC<Props> = ({ data, isLoading }) => {
               <div className="w-10 h-10 rounded-xl bg-emerald-500/10 flex items-center justify-center border border-emerald-500/20">
                 <TrendingUp size={20} className="text-emerald-500" />
               </div>
-              <h3 className="text-[10px] font-black text-emerald-500 uppercase tracking-widest">Live Contextual Evidence</h3>
+              <h3 className="text-[10px] font-black text-emerald-500 uppercase tracking-widest">Evidencia contextual</h3>
             </div>
           </div>
           <div className="h-[280px] relative z-10">
-             {data.chart_config && <ChartModule config={data.chart_config} />}
+             {data.chart_config && <ChartModule config={data.chart_config} data={data.raw_data} />}
           </div>
         </div>
       </div>
+
+      <ComparisonCards
+        items={comparisons}
+        sectionClassName="border-0 bg-transparent p-0"
+        gridClassName="grid gap-4 md:grid-cols-3"
+        cardClassName="rounded-[28px] border border-zinc-800 bg-zinc-900/40 p-6 shadow-xl"
+        titleClassName="hidden"
+      />
+
+      <EvidencePanels
+        evidence={evidence}
+        limitations={limitations}
+        sectionTitle="Evidencia y cautelas"
+        evidenceTitle="Evidencia utilizada"
+        limitationsTitle="Limitaciones y cautelas"
+        emptyLimitationsText="No se identificaron alertas críticas para esta lectura."
+        sectionClassName="space-y-3 border-0 bg-transparent p-0"
+        gridClassName="grid gap-4 lg:grid-cols-2"
+        panelClassName="rounded-[32px] border border-zinc-800 bg-zinc-900/40 p-7 shadow-xl"
+      />
 
       <div className="bg-gradient-to-br from-indigo-900/30 to-black border border-indigo-500/30 p-10 rounded-[50px] space-y-8 relative group overflow-hidden shadow-2xl">
         <div className="absolute inset-0 bg-[radial-gradient(circle_at_bottom_right,_var(--tw-gradient-stops))] from-indigo-500/10 via-transparent to-transparent opacity-50" />
@@ -79,16 +113,13 @@ export const IntelligenceDashboard: React.FC<Props> = ({ data, isLoading }) => {
             <Lightbulb size={28} />
           </div>
           <div>
-            <h3 className="text-[10px] font-black text-indigo-400 uppercase tracking-[0.4em]">Recomendación del analista</h3>
-            <p className="text-xl font-black text-white tracking-tighter uppercase italic">Executive Action Plan</p>
+            <h3 className="text-[10px] font-black text-indigo-400 uppercase tracking-[0.4em]">Lectura del analista</h3>
+            <p className="text-xl font-black text-white tracking-tighter uppercase italic">Diagnóstico y decisión</p>
           </div>
         </div>
         <div className="relative z-10">
           <StructuredNarrative text={data.narrative} compact />
         </div>
-        <button className="relative z-10 flex items-center gap-3 text-white font-black text-[10px] uppercase tracking-[0.2em] bg-indigo-600 px-8 py-4 rounded-2xl border border-indigo-400/40 hover:bg-indigo-500 transition-all shadow-xl shadow-indigo-600/20 active:scale-95">
-          Execute Intelligence Strategy <ArrowUpRight size={18} />
-        </button>
       </div>
     </div>
   );

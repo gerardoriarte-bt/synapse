@@ -5,6 +5,15 @@ import { TableModule } from './TableModule';
 import { ActionToolbar } from './ActionToolbar';
 import { AlertCircle } from 'lucide-react';
 import { StructuredNarrative } from '@/components/shared/StructuredNarrative';
+import { ExecutiveSummaryCard } from '@/components/shared/ExecutiveSummaryCard';
+import { ComparisonCards } from '@/components/shared/ComparisonCards';
+import { EvidencePanels } from '@/components/shared/EvidencePanels';
+import {
+  buildComparisonCards,
+  buildEvidenceSnapshot,
+  buildExecutiveHeadline,
+  buildLimitations,
+} from '@/lib/insight-utils';
 
 interface Props {
   data: SynapseResponse;
@@ -12,6 +21,13 @@ interface Props {
 
 export const DynamicRenderer: React.FC<Props> = ({ data }) => {
   const { narrative, render_type, chart_config, raw_data, response_id, decision_meta } = data;
+  const executiveHeadline = buildExecutiveHeadline(
+    narrative,
+    'Lectura ejecutiva generada para orientar la toma de decisiones.'
+  );
+  const comparisons = buildComparisonCards(decision_meta);
+  const evidence = buildEvidenceSnapshot(raw_data);
+  const limitations = buildLimitations(decision_meta);
 
   const renderModule = () => {
     switch (render_type) {
@@ -40,26 +56,19 @@ export const DynamicRenderer: React.FC<Props> = ({ data }) => {
 
   return (
     <div className="w-full space-y-6 p-6 bg-zinc-900/30 border border-zinc-800 rounded-2xl animate-in zoom-in-95 duration-500">
+      <ExecutiveSummaryCard
+        headline={executiveHeadline}
+        subtitle="Diagnóstico y decisión recomendada con foco en impacto de negocio."
+      />
+
       {/* Narrativa */}
       <section className="rounded-xl border border-zinc-800/70 bg-zinc-950/40 p-5">
         <StructuredNarrative text={narrative} />
       </section>
 
-      {decision_meta && (
-        <section className="space-y-3 rounded-xl border border-zinc-800 bg-zinc-950/60 p-4">
-          <div className="flex flex-wrap gap-2 text-[11px] uppercase tracking-wider">
-            <span className="rounded-md bg-zinc-900 px-2 py-1 text-zinc-300">
-              Intent: {decision_meta.intent}
-            </span>
-            <span className="rounded-md bg-zinc-900 px-2 py-1 text-zinc-300">
-              Confidence: {(decision_meta.confidence_score * 100).toFixed(0)}%
-            </span>
-            <span className="rounded-md bg-zinc-900 px-2 py-1 text-zinc-300">
-              Freshness: {decision_meta.data_freshness}
-            </span>
-          </div>
-        </section>
-      )}
+      <ComparisonCards items={comparisons} />
+
+      <EvidencePanels evidence={evidence} limitations={limitations} />
 
       {/* Visualizaciones */}
       <section className="min-h-[50px] w-full">

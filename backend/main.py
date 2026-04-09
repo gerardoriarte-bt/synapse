@@ -121,9 +121,6 @@ async def cortex_analyst_health():
 @app.post("/api/synapse/ask")
 async def ask_synapse(request: QueryRequest, db: Session = Depends(get_db)):
     try:
-        # Detección de modo Intelligence
-        is_intelligence = "REPORT" in request.query.upper() or "INTELLIGENCE" in request.query.upper() or "ESTRATEGIA" in request.query.upper()
-        
         # 1. Recuperar historial (últimos 5 para mayor contexto en storytelling)
         past_interactions = db.query(Conversation).filter(
             Conversation.user_id == request.user_id
@@ -131,19 +128,12 @@ async def ask_synapse(request: QueryRequest, db: Session = Depends(get_db)):
 
         history = [{"q": c.query, "a": c.narrative} for c in reversed(past_interactions)]
 
-        target_query = request.query
-        if is_intelligence:
-            target_query = (
-                "REALIZA UN ANÁLISIS ESTRATÉGICO DEL ROAS Y GASTO DE LAS ÚLTIMAS SEMANAS. "
-                "DEFINE UN PROBLEMA, UNA EVIDENCIA Y UNA SOLUCIÓN CONCRETA."
-            )
-
         mode = os.getenv("SYNAPSE_QUERY_MODE", "legacy").strip().lower()
         if mode == "cortex_analyst":
-            response = process_with_cortex_analyst(target_query, history)
+            response = process_with_cortex_analyst(request.query, history)
         else:
             agent = SnowflakeService(tenant_id=request.tenant_id)
-            response = agent.process_query(target_query, history=history)
+            response = agent.process_query(request.query, history=history)
 
         # 3. Persistir en Postgres
         new_conv = Conversation(

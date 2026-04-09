@@ -1,13 +1,14 @@
 import React, { ReactNode } from 'react';
 import Image from 'next/image';
-import { BarChart3, LayoutDashboard, Settings, HelpCircle, Activity } from 'lucide-react';
+import { BarChart3, LayoutDashboard } from 'lucide-react';
 
 interface Props {
   children: ReactNode;
   onViewChange?: (view: string) => void;
+  currentView?: 'chat' | 'intelligence';
 }
 
-export const SynapseChatLayout: React.FC<Props> = ({ children, onViewChange }) => {
+export const SynapseChatLayout: React.FC<Props> = ({ children, onViewChange, currentView = 'chat' }) => {
   return (
     <div className="flex h-screen bg-black text-zinc-100 overflow-hidden font-sans">
       {/* Sidebar Corporativo Premium */}
@@ -28,29 +29,21 @@ export const SynapseChatLayout: React.FC<Props> = ({ children, onViewChange }) =
           <SidebarItem 
             icon={<LayoutDashboard size={19} />} 
             label="Analytic Chat" 
-            active 
+            active={currentView === 'chat'}
             onClick={() => onViewChange?.('chat')}
           />
           <SidebarItem 
             icon={<BarChart3 size={19} />} 
             label="Marketing Intelligence" 
+            active={currentView === 'intelligence'}
             onClick={() => onViewChange?.('intelligence')}
           />
-          <SidebarItem icon={<Activity size={19} />} label="Alerts & Trends" />
-          <div className="pt-6 pb-2 px-3 text-[10px] font-bold text-zinc-600 uppercase tracking-widest">Workspace</div>
-          <SidebarItem icon={<Settings size={19} />} label="Configurations" />
-          <SidebarItem icon={<HelpCircle size={19} />} label="Knowledge Center" />
         </nav>
 
         {/* Footer Sidebar */}
-        <div className="px-3 py-4 border-t border-zinc-900 flex items-center gap-3">
-          <div className="w-8 h-8 rounded-full bg-indigo-600/20 border border-indigo-500/30 flex items-center justify-center text-[10px] font-bold text-indigo-400">
-            GA
-          </div>
-          <div className="text-xs">
-            <p className="font-semibold text-zinc-200">Ger Riarte</p>
-            <p className="text-zinc-500 text-[10px]">Analyst Pro</p>
-          </div>
+        <div className="px-3 py-4 border-t border-zinc-900">
+          <p className="text-[10px] font-bold uppercase tracking-[0.25em] text-zinc-600">Synapse Workspace</p>
+          <p className="mt-2 text-xs text-zinc-500">Vista enfocada en análisis y lectura ejecutiva de negocio.</p>
         </div>
       </aside>
 
@@ -59,7 +52,7 @@ export const SynapseChatLayout: React.FC<Props> = ({ children, onViewChange }) =
         <header className="h-20 border-b border-zinc-900 bg-black/40 backdrop-blur-md sticky top-0 z-20 flex items-center px-10">
           <div className="flex items-center gap-2">
             <div className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
-            <h2 className="text-xs font-bold text-zinc-500 uppercase tracking-widest">Enterprise Analytics Engine</h2>
+            <h2 className="text-xs font-bold text-zinc-500 uppercase tracking-widest">Synapse Analyst Workspace</h2>
           </div>
         </header>
 

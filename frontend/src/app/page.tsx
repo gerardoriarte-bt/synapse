@@ -6,11 +6,12 @@ import { DynamicRenderer } from '@/components/modules/DynamicRenderer';
 import { IntelligenceDashboard } from '@/components/modules/IntelligenceDashboard';
 import { SkeletonLoader } from '@/components/shared/SkeletonLoader';
 import { useSynapseQuery } from '@/hooks/useSynapseQuery';
-import { Send, Zap, Activity, Sparkles } from 'lucide-react';
+import { SynapseResponse } from '@/types/synapse';
+import { Send, Activity, Sparkles } from 'lucide-react';
 
 interface ChatMessage {
   query: string;
-  response: any;
+  response: SynapseResponse;
   createdAt: string;
 }
 
@@ -18,7 +19,7 @@ export default function Home() {
   const [view, setView] = useState<'chat' | 'intelligence'>('chat');
   const [query, setQuery] = useState('');
   const [messages, setMessages] = useState<ChatMessage[]>([]);
-  const [intelligenceData, setIntelligenceData] = useState<any>(null);
+  const [intelligenceData, setIntelligenceData] = useState<SynapseResponse | null>(null);
   const [lastIntelligenceQuery, setLastIntelligenceQuery] = useState<string | null>(null);
   
   const { askSynapse, isLoading, response, error } = useSynapseQuery();
@@ -49,6 +50,14 @@ export default function Home() {
     }
   }, [response]);
 
+  const hydrateIntelligenceFromLatestMessage = () => {
+    if (messages.length === 0) return false;
+    const latestMessage = messages[messages.length - 1];
+    setIntelligenceData(latestMessage.response);
+    setLastIntelligenceQuery(latestMessage.query);
+    return true;
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!query.trim()) return;
@@ -60,15 +69,32 @@ export default function Home() {
   };
 
   const generateIntelligence = async () => {
-    const intelligenceQuery = "GENERATE STRATEGIC INTELLIGENCE REPORT";
-    pendingQueryRef.current = intelligenceQuery;
-    pendingViewRef.current = 'intelligence';
     setView('intelligence');
-    await askSynapse(intelligenceQuery);
+    const trimmedQuery = query.trim();
+
+    if (trimmedQuery) {
+      setQuery('');
+      pendingQueryRef.current = trimmedQuery;
+      pendingViewRef.current = 'intelligence';
+      await askSynapse(trimmedQuery);
+      return;
+    }
+
+    hydrateIntelligenceFromLatestMessage();
+  };
+
+  const handleViewChange = (nextView: 'chat' | 'intelligence') => {
+    setView(nextView);
+    if (nextView === 'intelligence') {
+      hydrateIntelligenceFromLatestMessage();
+    }
   };
 
   return (
-    <SynapseChatLayout onViewChange={(v) => setView(v as 'chat' | 'intelligence')}>
+    <SynapseChatLayout
+      currentView={view}
+      onViewChange={(v) => handleViewChange(v as 'chat' | 'intelligence')}
+    >
       <div className="flex flex-col min-h-full">
         {view === 'intelligence' ? (
           <div className="space-y-10">
@@ -107,15 +133,15 @@ export default function Home() {
                    <Sparkles className="text-indigo-400" size={36} />
                 </div>
                 <div className="space-y-3">
-                  <h1 className="text-5xl font-black tracking-tighter text-white">Advanced Analytics</h1>
+                  <h1 className="text-5xl font-black tracking-tighter text-white">Synapse Analyst</h1>
                   <p className="text-zinc-500 max-w-sm mx-auto font-medium leading-relaxed">
-                    Consulta tus datos de negocio en tiempo real con análisis asistido por Synapse.
+                    Consulta tus datos de negocio y transforma cada respuesta en una lectura ejecutiva accionable.
                   </p>
                 </div>
                 <div className="flex flex-wrap justify-center gap-3 max-w-xl">
-                  <SuggestionChip text="Perform Strategic Analysis" onClick={generateIntelligence} highlight />
-                  <SuggestionChip text="Weekly ROAS Performance" onClick={() => { setQuery('¿Cómo ha variado el ROAS las últimas semanas?'); }} />
-                  <SuggestionChip text="Anomaly Detection" onClick={() => { setQuery('Busca anomalías de gasto ayer'); }} />
+                  <SuggestionChip text="Vista Ejecutiva" onClick={generateIntelligence} highlight />
+                  <SuggestionChip text="ROAS Semanal" onClick={() => { setQuery('¿Cómo ha variado el ROAS las últimas semanas?'); }} />
+                  <SuggestionChip text="Anomalías de Gasto" onClick={() => { setQuery('Busca anomalías de gasto ayer'); }} />
                 </div>
               </div>
             )}
@@ -159,7 +185,7 @@ export default function Home() {
                     type="text"
                     value={query}
                     onChange={(e) => setQuery(e.target.value)}
-                    placeholder="Enter analytical command..."
+                    placeholder="Escribe una consulta de negocio..."
                     className="flex-grow bg-transparent border-none outline-none px-6 py-4 text-sm text-zinc-200 placeholder-zinc-600 font-semibold tracking-tight"
                   />
                   <button type="submit" disabled={isLoading || !query.trim()} className="p-4 bg-white text-black rounded-2xl hover:bg-zinc-200 disabled:opacity-30 transition-all shadow-xl active:scale-90">
