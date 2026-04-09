@@ -40,6 +40,8 @@ def _build_messages(user_query: str, history: List[Dict[str, str]]) -> List[Dict
     strict = (
         "INSTRUCCIONES OBLIGATORIAS:\n"
         "- Responde exactamente la pregunta del usuario.\n"
+        "- Idioma de salida: español (es-ES/es-LATAM), claro y profesional.\n"
+        "- No uses introducciones en inglés ni frases de sistema (ej.: 'This is our interpretation...').\n"
         "- Si el usuario define periodo (mes/año/rango), filtra SOLO ese periodo.\n"
         "- No amplíes fechas ni agregues periodos adicionales.\n"
         "- Para periodos de campañas, aplica el filtro temporal sobre la columna de fecha del modelo.\n"
