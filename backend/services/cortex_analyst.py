@@ -293,6 +293,19 @@ def _merge_agent_run_config_extra() -> Dict[str, Any]:
     return parsed
 
 
+def _agent_strict_prefix() -> str:
+    return (
+        "INSTRUCCIONES OBLIGATORIAS:\n"
+        "- Responde SOLO en español.\n"
+        "- Entrega SOLO la respuesta final al usuario.\n"
+        "- No muestres razonamiento interno, pasos intermedios, ni frases como "
+        "'The user is asking', 'Let me', 'I will'.\n"
+        "- No repitas la pregunta.\n"
+        "- Si incluyes tabla, que sea clara y breve.\n\n"
+        "CONSULTA DEL USUARIO:\n"
+    )
+
+
 def _agent_payload_mode() -> str:
     mode = os.getenv("CORTEX_AGENT_PAYLOAD_MODE", "messages").strip().lower()
     if mode not in ("messages", "named_agent_query"):
@@ -350,7 +363,7 @@ def _agent_run_payload(
         payload: Dict[str, Any] = {
             **extra_cfg,
             "agent_name": agent_name,
-            "query": user_query,
+            "query": f"{_agent_strict_prefix()}{user_query}",
             "stream": False,
         }
         params = _agent_run_params_from_env()
@@ -372,7 +385,10 @@ def _agent_run_payload(
         payload["thread_id"] = agent_thread_id
         payload["parent_message_id"] = agent_parent_message_id
         payload["messages"] = [
-            {"role": "user", "content": [{"type": "text", "text": user_query}]},
+            {
+                "role": "user",
+                "content": [{"type": "text", "text": f"{_agent_strict_prefix()}{user_query}"}],
+            },
         ]
         payload["stream"] = False
         return payload
@@ -509,9 +525,13 @@ def _english_noise_line(line: str) -> bool:
     if not s:
         return False
     patterns = (
+        r"^the user is asking.*$",
         r"^the question is clear.*sql\.?$",
         r"^i have the data broken down.*$",
         r"^let me (organize|break down|present).*$",
+        r"^let me (calculate|summarize|add).*$",
+        r"^i can answer it with the following sql.*$",
+        r"^i will .*",
         r"^now i need to present this in a clear way.*$",
     )
     return any(re.match(p, s) for p in patterns)
