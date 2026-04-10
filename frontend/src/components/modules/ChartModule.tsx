@@ -11,7 +11,21 @@ interface Props {
 
 const ReactECharts = dynamic(() => import('echarts-for-react'), { ssr: false });
 
-const PALETTE = ['#6366f1', '#14b8a6', '#22c55e', '#f59e0b', '#f97316', '#a78bfa', '#06b6d4'];
+const PALETTE = [
+  '#1F6AA5',
+  '#2B82CC',
+  '#3F9DE3',
+  '#8EC9F3',
+  '#C9E7FB',
+  '#F4FAFF',
+  '#FAF0E2',
+  '#F7DDB8',
+  '#F4BE84',
+  '#F39A4A',
+  '#EE7422',
+  '#D95D15',
+];
+const PRIMARY_ACCENT = '#2B82CC';
 
 const formatNumber = (value: number): string => {
   if (!Number.isFinite(value)) return '0';
@@ -81,13 +95,13 @@ export const ChartModule: React.FC<Props> = ({ config }) => {
                   smooth: config.type === 'line',
                   showSymbol: config.type === 'line',
                   symbolSize: 8,
-                  lineStyle: { width: 3, color: PALETTE[0] },
-                  itemStyle: { color: PALETTE[0] },
+                  lineStyle: { width: 3, color: PRIMARY_ACCENT },
+                  itemStyle: { color: PRIMARY_ACCENT },
                   areaStyle:
                     config.type === 'line'
                       ? {
                           opacity: 0.12,
-                          color: PALETTE[0],
+                          color: PRIMARY_ACCENT,
                         }
                       : undefined,
                   barMaxWidth: 40,
@@ -188,10 +202,10 @@ export const ChartModule: React.FC<Props> = ({ config }) => {
               height: 14,
               borderColor: '#3f3f46',
               backgroundColor: '#18181b',
-              fillerColor: 'rgba(99,102,241,0.22)',
               handleStyle: {
-                color: '#6366f1',
+                color: PRIMARY_ACCENT,
               },
+              fillerColor: 'rgba(43,130,204,0.22)',
               start: 0,
               end: chartData.length > 14 ? 55 : 100,
             },
