@@ -212,8 +212,8 @@ export default function Home() {
             {/* Input Estilo Comando */}
             <form onSubmit={handleSubmit} className="fixed bottom-12 left-1/2 -translate-x-1/2 w-full max-w-3xl px-6 z-40">
               <div className="relative group">
-                <div className="absolute -inset-1 bg-gradient-to-r from-indigo-500/10 to-indigo-900/10 rounded-[2rem] blur-2xl opacity-0 group-focus-within:opacity-100 transition duration-1000" />
-                <div className="relative flex items-center gap-3 p-2 bg-black/60 backdrop-blur-3xl border border-white/5 rounded-[1.8rem] shadow-2xl transition-all duration-300 group-focus-within:border-white/10 group-focus-within:bg-black/80">
+                <div className="absolute -inset-1 bg-gradient-to-r from-indigo-500/20 via-blue-500/10 to-indigo-900/20 rounded-[2rem] blur-2xl opacity-30 group-focus-within:opacity-100 transition duration-700" />
+                <div className="relative flex items-center gap-3 p-2 bg-black/55 backdrop-blur-3xl border border-indigo-300/35 rounded-[1.8rem] shadow-2xl transition-all duration-300 group-focus-within:border-indigo-200/70 group-focus-within:bg-black/75">
                   <input
                     type="text"
                     value={query}

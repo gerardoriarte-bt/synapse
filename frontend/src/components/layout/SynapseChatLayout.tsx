@@ -10,7 +10,7 @@ interface Props {
 
 export const SynapseChatLayout: React.FC<Props> = ({ children, onViewChange, currentView = 'chat' }) => {
   return (
-    <div className="flex h-screen bg-black text-zinc-100 overflow-hidden font-sans">
+    <div className="flex h-screen bg-[#141414] text-zinc-100 overflow-hidden font-sans">
       {/* Sidebar Corporativo Premium */}
       <aside className="w-72 border-r border-zinc-900 flex flex-col p-6 space-y-10 bg-[#050505]/80 backdrop-blur-xl">
         <div className="flex items-center justify-center px-4 pb-2">
@@ -48,8 +48,8 @@ export const SynapseChatLayout: React.FC<Props> = ({ children, onViewChange, cur
       </aside>
 
       {/* Área de Contenido Principal con fondo degradado sutil */}
-      <main className="flex-grow flex flex-col relative bg-[radial-gradient(circle_at_top_right,_var(--tw-gradient-stops))] from-zinc-900/10 via-black to-black">
-        <header className="h-20 border-b border-zinc-900 bg-black/40 backdrop-blur-md sticky top-0 z-20 flex items-center px-10">
+      <main className="flex-grow flex flex-col relative bg-[linear-gradient(to_bottom,#17283A_0%,#141414_100%)]">
+        <header className="h-20 border-b border-white/10 bg-black/25 backdrop-blur-md sticky top-0 z-20 flex items-center px-10">
           <div className="flex items-center gap-2">
             <div className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
             <h2 className="text-xs font-bold text-zinc-500 uppercase tracking-widest">Synapse Analyst Workspace</h2>
