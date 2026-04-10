@@ -758,6 +758,16 @@ def _needs_analyst_fallback(narrative: str, sql_statement: Optional[str]) -> boo
     return any(t in txt for t in triggers)
 
 
+def _is_timeout_error(message: str) -> bool:
+    txt = (message or "").lower()
+    return (
+        "timed out" in txt
+        or "timeout" in txt
+        or "read operation timed out" in txt
+        or "time out" in txt
+    )
+
+
 def validate_cortex_analyst_config() -> Dict[str, Any]:
     """Comprueba variables mínimas sin llamar a la API (útil para /health)."""
     errors: List[str] = []
@@ -835,7 +845,27 @@ def process_with_cortex_analyst(
             )
             agent_body = body
         except Exception as e:
-            if _fallback_to_analyst_enabled() and _fallback_mode() in (
+            if _is_timeout_error(str(e)):
+                body = {
+                    "response": (
+                        "La consulta tardó más de lo esperado en Synapse Analyst. "
+                        "Para responder de forma confiable, acota el alcance (por ejemplo: "
+                        "una sola métrica, rango de fechas más corto o menos dimensiones)."
+                    ),
+                    "warnings": [
+                        {
+                            "message": (
+                                "Timeout en Agent Run. Se evitó fallback para no exceder el tiempo total "
+                                "de respuesta del gateway."
+                            )
+                        }
+                    ],
+                }
+                agent_body = body
+                effective_mode = "agent_timeout"
+                fallback_reason = "agent_timeout"
+                agent_error_message = str(e)
+            elif _fallback_to_analyst_enabled() and _fallback_mode() in (
                 "error_only",
                 "content_or_error",
             ):
