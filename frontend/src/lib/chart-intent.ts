@@ -16,6 +16,15 @@ type IntentInput = {
 };
 
 const INTENT_KEYWORDS = [
+  'grafica',
+  'gráfica',
+  'graficar',
+  'grafico',
+  'gráfico',
+  'visualiza',
+  'visualizar',
+  'chart',
+  'graph',
   'analiza',
   'analisis',
   'análisis',

@@ -53,7 +53,7 @@ export const DynamicRenderer: React.FC<Props> = ({ data }) => {
         );
 
       case 'text':
-        if (!raw_data || raw_data.length === 0 || !smartChartConfig || !chartIntent.shouldRender) {
+        if (!smartChartConfig || !chartIntent.shouldRender) {
           return null;
         }
         return (
@@ -62,7 +62,7 @@ export const DynamicRenderer: React.FC<Props> = ({ data }) => {
               <ChartModule config={smartChartConfig} />
               <p className="text-xs text-zinc-500">{chartIntent.reason}</p>
             </div>
-            <TableModule data={raw_data} />
+            {raw_data && raw_data.length > 0 && <TableModule data={raw_data} />}
           </div>
         );
 
