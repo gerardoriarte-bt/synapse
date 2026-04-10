@@ -7,7 +7,7 @@ import { IntelligenceDashboard } from '@/components/modules/IntelligenceDashboar
 import { SkeletonLoader } from '@/components/shared/SkeletonLoader';
 import { useSynapseQuery } from '@/hooks/useSynapseQuery';
 import { SynapseResponse } from '@/types/synapse';
-import { Send, Activity, Sparkles } from 'lucide-react';
+import { Send, Activity, Sparkles, Loader2 } from 'lucide-react';
 
 interface ChatMessage {
   query: string;
@@ -21,6 +21,9 @@ export default function Home() {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [intelligenceData, setIntelligenceData] = useState<SynapseResponse | null>(null);
   const [lastIntelligenceQuery, setLastIntelligenceQuery] = useState<string | null>(null);
+  const [activeQuery, setActiveQuery] = useState<string | null>(null);
+  const [loadingSeconds, setLoadingSeconds] = useState(0);
+  const [loadingPhase, setLoadingPhase] = useState(0);
   
   const { askSynapse, isLoading, response, error } = useSynapseQuery();
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -50,6 +53,15 @@ export default function Home() {
     }
   }, [response]);
 
+  useEffect(() => {
+    if (!isLoading) return;
+    const timer = window.setInterval(() => {
+      setLoadingSeconds((prev) => prev + 1);
+      setLoadingPhase((prev) => (prev + 1) % LOADING_STEPS.length);
+    }, 1000);
+    return () => window.clearInterval(timer);
+  }, [isLoading]);
+
   const hydrateIntelligenceFromLatestMessage = () => {
     if (messages.length === 0) return false;
     const latestMessage = messages[messages.length - 1];
@@ -64,8 +76,14 @@ export default function Home() {
     const currentQuery = query;
     setQuery('');
     pendingQueryRef.current = currentQuery;
+    setActiveQuery(currentQuery);
+    setLoadingSeconds(0);
+    setLoadingPhase(0);
     pendingViewRef.current = 'chat';
     await askSynapse(currentQuery);
+    setActiveQuery(null);
+    setLoadingSeconds(0);
+    setLoadingPhase(0);
   };
 
   const generateIntelligence = async () => {
@@ -75,8 +93,14 @@ export default function Home() {
     if (trimmedQuery) {
       setQuery('');
       pendingQueryRef.current = trimmedQuery;
+      setActiveQuery(trimmedQuery);
+      setLoadingSeconds(0);
+      setLoadingPhase(0);
       pendingViewRef.current = 'intelligence';
       await askSynapse(trimmedQuery);
+      setActiveQuery(null);
+      setLoadingSeconds(0);
+      setLoadingPhase(0);
       return;
     }
 
@@ -171,7 +195,16 @@ export default function Home() {
                   </div>
                 </div>
               ))}
-              {isLoading && <div className="space-y-6 pt-6 pl-12"><SkeletonLoader /></div>}
+              {isLoading && (
+                <div className="space-y-6 pt-6 pl-12">
+                  <ProcessingIndicator
+                    query={activeQuery}
+                    seconds={loadingSeconds}
+                    phase={LOADING_STEPS[loadingPhase]}
+                  />
+                  <SkeletonLoader />
+                </div>
+              )}
               {error && <div className="p-6 bg-red-950/10 border border-red-900/20 rounded-3xl text-red-500 text-xs italic ml-12">{error}</div>}
               <div ref={messagesEndRef} />
             </div>
@@ -189,7 +222,7 @@ export default function Home() {
                     className="flex-grow bg-transparent border-none outline-none px-6 py-4 text-sm text-zinc-200 placeholder-zinc-600 font-semibold tracking-tight"
                   />
                   <button type="submit" disabled={isLoading || !query.trim()} className="p-4 bg-white text-black rounded-2xl hover:bg-zinc-200 disabled:opacity-30 transition-all shadow-xl active:scale-90">
-                    <Send size={20} />
+                    {isLoading ? <Loader2 size={20} className="animate-spin" /> : <Send size={20} />}
                   </button>
                 </div>
               </div>
@@ -212,4 +245,31 @@ const SuggestionChip = ({ text, onClick, highlight = false }: { text: string; on
   >
     {text}
   </button>
+);
+
+const LOADING_STEPS = [
+  'Interpretando consulta',
+  'Consultando Synapse Analyst',
+  'Procesando resultados',
+  'Construyendo visualizaciones',
+];
+
+const ProcessingIndicator = ({
+  query,
+  seconds,
+  phase,
+}: {
+  query: string | null;
+  seconds: number;
+  phase: string;
+}) => (
+  <div className="rounded-2xl border border-indigo-500/20 bg-indigo-950/20 p-4">
+    <div className="flex items-center gap-2 text-indigo-300">
+      <Loader2 size={15} className="animate-spin" />
+      <p className="text-xs font-semibold uppercase tracking-wider">Procesando consulta</p>
+      <span className="ml-auto text-[11px] text-indigo-200/80">{seconds}s</span>
+    </div>
+    <p className="mt-2 text-sm text-indigo-100">{phase}...</p>
+    {query && <p className="mt-2 text-xs text-zinc-400 line-clamp-2">{query}</p>}
+  </div>
 );
