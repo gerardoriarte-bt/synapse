@@ -689,6 +689,39 @@ def _collect_agent_text_fragments(body: Any, limit: int = 10) -> List[str]:
     return unique
 
 
+def _sanitize_agent_fragments(fragments: List[str], narrative: str, limit: int = 3) -> List[str]:
+    if not fragments:
+        return []
+    narrative_norm = (narrative or "").strip().lower()
+    kept: List[str] = []
+    seen = set()
+    for frag in fragments:
+        txt = (frag or "").strip()
+        if not txt:
+            continue
+        txt = _sanitize_english_preamble(txt)
+        txt = _sanitize_brand_terms(txt)
+        txt = _sanitize_language_noise(txt).strip()
+        if not txt:
+            continue
+        if _internal_instruction_paragraph(txt):
+            continue
+        en = _english_marker_score(txt)
+        es = _spanish_marker_score(txt)
+        if en >= 2 and en > es:
+            continue
+        low = txt.lower()
+        if narrative_norm and (low == narrative_norm or low in narrative_norm or narrative_norm in low):
+            continue
+        if low in seen:
+            continue
+        seen.add(low)
+        kept.append(txt)
+        if len(kept) >= limit:
+            break
+    return kept
+
+
 def _parse_agent_run_body(body: Dict[str, Any]) -> Tuple[str, Optional[str], List[str], Dict[str, Any]]:
     """
     Parser tolerante para Agent Run.
@@ -723,9 +756,7 @@ def _parse_agent_run_body(body: Dict[str, Any]) -> Tuple[str, Optional[str], Lis
 
     walk(body)
     narrative = "\n\n".join([p.strip() for p in text_parts if p and p.strip()]).strip()
-    fragments = _collect_agent_text_fragments(body)
-    if fragments:
-        extra["agent_text_fragments"] = fragments
+    raw_fragments = _collect_agent_text_fragments(body)
     if not narrative:
         # Fallback para respuestas donde el texto viene en campos alternos.
         for key in ("response", "answer", "output_text"):
@@ -733,11 +764,14 @@ def _parse_agent_run_body(body: Dict[str, Any]) -> Tuple[str, Optional[str], Lis
             if isinstance(val, str) and val.strip():
                 narrative = val.strip()
                 break
-    if not narrative and fragments:
-        narrative = "\n\n".join(fragments[:3]).strip()
+    if not narrative and raw_fragments:
+        narrative = "\n\n".join(raw_fragments[:3]).strip()
     narrative = _sanitize_english_preamble(narrative)
     narrative = _sanitize_brand_terms(narrative)
     narrative = _sanitize_language_noise(narrative)
+    fragments = _sanitize_agent_fragments(raw_fragments, narrative)
+    if fragments:
+        extra["agent_text_fragments"] = fragments
     if body.get("response_metadata"):
         extra["response_metadata"] = body.get("response_metadata")
     if body.get("thread_id") is not None:

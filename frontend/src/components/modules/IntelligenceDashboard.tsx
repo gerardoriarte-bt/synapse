@@ -6,6 +6,7 @@ import { TableModule } from './TableModule';
 import { inferChartConfigFromRawData } from '@/lib/chart-inference';
 import { MarkdownNarrative } from './MarkdownNarrative';
 import { resolveAutoChartIntent } from '@/lib/chart-intent';
+import { keepSpanishFragments } from '@/lib/narrative-filter';
 
 interface Props {
   data: SynapseResponse | null;
@@ -40,9 +41,7 @@ export const IntelligenceDashboard: React.FC<Props> = ({ data, isLoading }) => {
     explicitChartConfig: data.chart_config,
   });
   const smartChartConfig = chartIntent.chartConfig ?? inferredChartConfig;
-  const extraFragments = (data.cortex_analyst?.agent_text_fragments ?? []).filter(
-    (frag) => frag.trim() && frag.trim() !== data.narrative.trim()
-  );
+  const extraFragments = keepSpanishFragments(data.cortex_analyst?.agent_text_fragments ?? [], data.narrative, 3);
   return (
     <div className="space-y-6 animate-in fade-in duration-700">
       <section className="rounded-xl border border-zinc-800/70 bg-zinc-950/40 p-5">

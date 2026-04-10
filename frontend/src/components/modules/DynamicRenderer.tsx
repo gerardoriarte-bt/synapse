@@ -7,6 +7,7 @@ import { AlertCircle } from 'lucide-react';
 import { inferChartConfigFromRawData } from '@/lib/chart-inference';
 import { MarkdownNarrative } from './MarkdownNarrative';
 import { resolveAutoChartIntent } from '@/lib/chart-intent';
+import { keepSpanishFragments } from '@/lib/narrative-filter';
 
 interface Props {
   data: SynapseResponse;
@@ -22,9 +23,7 @@ export const DynamicRenderer: React.FC<Props> = ({ data }) => {
   });
   const smartChartConfig = chartIntent.chartConfig ?? inferredChartConfig;
   const showChart = Boolean(smartChartConfig && chartIntent.shouldRender);
-  const extraFragments = (data.cortex_analyst?.agent_text_fragments ?? []).filter(
-    (frag) => frag.trim() && frag.trim() !== narrative.trim()
-  );
+  const extraFragments = keepSpanishFragments(data.cortex_analyst?.agent_text_fragments ?? [], narrative, 2);
 
   const renderModule = () => {
     switch (render_type) {
