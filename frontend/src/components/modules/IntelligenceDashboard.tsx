@@ -4,6 +4,7 @@ import { SynapseResponse } from '@/types/synapse';
 import { ChartModule } from './ChartModule';
 import { TableModule } from './TableModule';
 import { inferChartConfigFromRawData } from '@/lib/chart-inference';
+import { MarkdownNarrative } from './MarkdownNarrative';
 
 interface Props {
   data: SynapseResponse | null;
@@ -38,7 +39,7 @@ export const IntelligenceDashboard: React.FC<Props> = ({ data, isLoading }) => {
   return (
     <div className="space-y-6 animate-in fade-in duration-700">
       <section className="rounded-xl border border-zinc-800/70 bg-zinc-950/40 p-5">
-        <p className="whitespace-pre-wrap text-zinc-100 leading-relaxed">{data.narrative}</p>
+        <MarkdownNarrative content={data.narrative} />
       </section>
       {extraFragments.length > 0 && (
         <section className="space-y-3">
@@ -47,7 +48,7 @@ export const IntelligenceDashboard: React.FC<Props> = ({ data, isLoading }) => {
               key={`${data.response_id}-fragment-${idx}`}
               className="rounded-xl border border-zinc-800/70 bg-zinc-950/30 p-4"
             >
-              <p className="whitespace-pre-wrap text-zinc-200 leading-relaxed">{fragment}</p>
+              <MarkdownNarrative content={fragment} className="text-zinc-200" />
             </article>
           ))}
         </section>

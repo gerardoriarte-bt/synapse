@@ -5,6 +5,7 @@ import { TableModule } from './TableModule';
 import { ActionToolbar } from './ActionToolbar';
 import { AlertCircle } from 'lucide-react';
 import { inferChartConfigFromRawData } from '@/lib/chart-inference';
+import { MarkdownNarrative } from './MarkdownNarrative';
 
 interface Props {
   data: SynapseResponse;
@@ -48,7 +49,7 @@ export const DynamicRenderer: React.FC<Props> = ({ data }) => {
   return (
     <div className="w-full space-y-6 p-6 bg-zinc-900/30 border border-zinc-800 rounded-2xl animate-in zoom-in-95 duration-500">
       <section className="rounded-xl border border-zinc-800/70 bg-zinc-950/40 p-5">
-        <p className="whitespace-pre-wrap text-zinc-100 leading-relaxed">{narrative}</p>
+        <MarkdownNarrative content={narrative} />
       </section>
       {extraFragments.length > 0 && (
         <section className="space-y-3">
@@ -57,7 +58,7 @@ export const DynamicRenderer: React.FC<Props> = ({ data }) => {
               key={`${response_id}-fragment-${idx}`}
               className="rounded-xl border border-zinc-800/70 bg-zinc-950/30 p-4"
             >
-              <p className="whitespace-pre-wrap text-zinc-200 leading-relaxed">{fragment}</p>
+              <MarkdownNarrative content={fragment} className="text-zinc-200" />
             </article>
           ))}
         </section>
