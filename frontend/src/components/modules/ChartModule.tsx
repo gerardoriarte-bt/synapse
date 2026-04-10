@@ -128,6 +128,13 @@ export const ChartModule: React.FC<Props> = ({ config }) => {
     value: d.value,
     itemStyle: { color: valueColor(d.value) },
   }));
+  const donutTotal = chartData.reduce((acc, item) => acc + (Number.isFinite(item.value) ? item.value : 0), 0);
+  const donutPercentByName = new Map<string, string>(
+    chartData.map((item) => {
+      const pct = donutTotal > 0 ? (item.value / donutTotal) * 100 : 0;
+      return [item.name, `${pct.toFixed(1)}%`];
+    })
+  );
 
   const series =
     config.type === 'donut'
@@ -138,7 +145,7 @@ export const ChartModule: React.FC<Props> = ({ config }) => {
             center: ['50%', '50%'],
             data: chartData
               .map((d) => ({ name: d.name, value: d.value }))
-              .sort((a, b) => a.value - b.value)
+              .sort((a, b) => b.value - a.value)
               .map((d) => ({
                 ...d,
                 itemStyle: { color: valueColor(d.value) },
@@ -232,6 +239,10 @@ export const ChartModule: React.FC<Props> = ({ config }) => {
       top: 8,
       textStyle: { color: theme.legendText, fontSize: 11 },
       type: 'scroll',
+      formatter:
+        config.type === 'donut'
+          ? (name: string) => `${name} (${donutPercentByName.get(name) ?? '0.0%'})`
+          : undefined,
     },
     toolbox: {
       right: 8,

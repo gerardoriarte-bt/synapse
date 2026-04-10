@@ -29,6 +29,13 @@ const METRIC_PRIORITY = [
 ];
 
 const DIMENSION_PRIORITY = [
+  'FUENTE',
+  'PLATAFORMA',
+  'MEDIO',
+  'CANAL',
+  'PLATFORM',
+  'CHANNEL',
+  'SOURCE',
   'DATE',
   'FECHA',
   'DAY',
@@ -36,11 +43,9 @@ const DIMENSION_PRIORITY = [
   'WEEK',
   'CAMPAIGN_PRIMARIO',
   'CAMPAIGN',
-  'FUENTE',
-  'CHANNEL',
-  'PLATFORM',
-  'SOURCE',
 ];
+
+const DIMENSION_EXCLUDE_HINT = /^(#|id|rank|ranking|orden|position|posicion)$/i;
 
 const toNumber = (value: unknown): number | null => {
   if (typeof value === 'number' && Number.isFinite(value)) return value;
@@ -60,6 +65,20 @@ const looksLikeDate = (value: unknown): boolean => {
   if (/^\d{4}-\d{2}-\d{2}/.test(v)) return true;
   if (/^\d{4}\/\d{2}\/\d{2}/.test(v)) return true;
   return !Number.isNaN(Date.parse(v));
+};
+
+const mostlyNumericLabels = (rows: Record<string, unknown>[], key: string): boolean => {
+  let numeric = 0;
+  let total = 0;
+  for (const row of rows) {
+    const raw = row[key];
+    if (raw === null || raw === undefined) continue;
+    const txt = String(raw).trim();
+    if (!txt) continue;
+    total += 1;
+    if (/^-?\d+([.,]\d+)?$/.test(txt)) numeric += 1;
+  }
+  return total > 0 && numeric >= Math.ceil(total * 0.7);
 };
 
 const prettifyLabel = (raw: string): string =>
@@ -90,11 +109,18 @@ export const inferChartConfigFromRawData = (rawData?: unknown[]): ChartConfig | 
 
   const dimensionKeys = keys.filter((k) => !numericKeys.includes(k));
   if (dimensionKeys.length === 0) return null;
+  const nonRankingDimensionKeys = dimensionKeys.filter((k) => !DIMENSION_EXCLUDE_HINT.test(k));
+  const preferredDimensionKeys =
+    nonRankingDimensionKeys.length > 0 ? nonRankingDimensionKeys : dimensionKeys;
+  const dimensionPool = preferredDimensionKeys.length > 0 ? preferredDimensionKeys : dimensionKeys;
 
   const metricKey =
     METRIC_PRIORITY.find((p) => numericKeys.includes(p)) ?? numericKeys[0];
-  const dimensionKey =
-    DIMENSION_PRIORITY.find((p) => dimensionKeys.includes(p)) ?? dimensionKeys[0];
+  let dimensionKey = DIMENSION_PRIORITY.find((p) => dimensionPool.includes(p)) ?? dimensionPool[0];
+  if (mostlyNumericLabels(rows, dimensionKey)) {
+    const alternative = dimensionPool.find((k) => !mostlyNumericLabels(rows, k));
+    if (alternative) dimensionKey = alternative;
+  }
 
   const aggregate = new Map<string, number>();
   for (const row of rows) {

@@ -2,6 +2,8 @@ import { ChartConfig } from '@/types/synapse';
 
 const PERIOD_HINT = /(ene|feb|mar|abr|may|jun|jul|ago|sep|oct|nov|dic|jan|apr|aug|dec|20\d{2})/i;
 const EXCLUDE_METRIC_HINT = /(variaci|cambio|delta|pp|%)/i;
+const DIMENSION_PRIORITY_HINT = /(fuente|plataforma|platform|source|medio|canal|channel|campaign|campaña|categoria|categoría)/i;
+const DIMENSION_EXCLUDE_HINT = /^(#|id|rank|ranking|orden|position|posicion)$/i;
 
 const toNumber = (raw: string): number | null => {
   const cleaned = raw
@@ -23,6 +25,34 @@ const parseRow = (line: string): string[] => {
     .slice(1, -1)
     .split('|')
     .map((s) => s.trim());
+};
+
+const isMostlyNumericColumn = (rows: string[][], colIdx: number): boolean => {
+  let numeric = 0;
+  let total = 0;
+  for (const row of rows) {
+    const value = row[colIdx]?.trim();
+    if (!value) continue;
+    total += 1;
+    if (toNumber(value) !== null) numeric += 1;
+  }
+  return total > 0 && numeric >= Math.ceil(total * 0.7);
+};
+
+const selectDimensionIdx = (headers: string[], rows: string[][]): number => {
+  const ranked = headers.map((h, idx) => {
+    const header = h.trim();
+    const normalized = header.toLowerCase();
+    const mostlyNumeric = isMostlyNumericColumn(rows, idx);
+    const priority = DIMENSION_PRIORITY_HINT.test(normalized) ? 3 : 0;
+    const excluded = DIMENSION_EXCLUDE_HINT.test(normalized);
+    return {
+      idx,
+      score: priority + (mostlyNumeric ? -5 : 2) + (excluded ? -8 : 0),
+    };
+  });
+  ranked.sort((a, b) => b.score - a.score);
+  return ranked[0]?.idx ?? 0;
 };
 
 export const inferChartConfigFromMarkdownTable = (narrative?: string): ChartConfig | null => {
@@ -52,7 +82,7 @@ export const inferChartConfigFromMarkdownTable = (narrative?: string): ChartConf
   }
   if (rows.length < 2) return null;
 
-  const dimensionIdx = 0;
+  const dimensionIdx = selectDimensionIdx(headers, rows);
   const candidates = headers
     .map((h, idx) => ({ h, idx }))
     .filter(({ idx }) => idx !== dimensionIdx)
