@@ -12,7 +12,7 @@ export const SynapseChatLayout: React.FC<Props> = ({ children, onViewChange, cur
   return (
     <div className="flex h-screen bg-[#141414] text-zinc-100 overflow-hidden font-sans">
       {/* Sidebar Corporativo Premium */}
-      <aside className="w-72 border-r border-zinc-900 flex flex-col p-6 space-y-10 bg-[#050505]/80 backdrop-blur-xl">
+      <aside className="w-72 m-4 rounded-2xl border border-white/20 shadow-[0_0_26px_rgba(255,255,255,0.10)] flex flex-col p-6 space-y-10 bg-[#050505]/62 backdrop-blur-xl">
         <div className="flex items-center justify-center px-4 pb-2">
           <div className="relative w-full h-20">
             <Image 
