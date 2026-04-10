@@ -462,6 +462,7 @@ def _parse_analyst_body(body: Dict[str, Any]) -> Tuple[str, Optional[str], List[
     narrative = "\n\n".join(p for p in narrative_parts if p).strip()
     narrative = _sanitize_english_preamble(narrative)
     narrative = _sanitize_brand_terms(narrative)
+    narrative = _sanitize_language_noise(narrative)
     warnings_list: List[str] = []
     for w in body.get("warnings") or []:
         if isinstance(w, dict) and w.get("message"):
@@ -501,6 +502,101 @@ def _sanitize_brand_terms(text: str) -> str:
         return text
     out = re.sub(r"\bsnowflake\b", "Synapse", text, flags=re.IGNORECASE)
     return out
+
+
+def _english_noise_line(line: str) -> bool:
+    s = (line or "").strip().lower()
+    if not s:
+        return False
+    patterns = (
+        r"^the question is clear.*sql\.?$",
+        r"^i have the data broken down.*$",
+        r"^let me (organize|break down|present).*$",
+        r"^now i need to present this in a clear way.*$",
+    )
+    return any(re.match(p, s) for p in patterns)
+
+
+def _spanish_marker_score(text: str) -> int:
+    t = f" {text.lower()} "
+    markers = (
+        " el ",
+        " la ",
+        " los ",
+        " las ",
+        " de ",
+        " del ",
+        " para ",
+        " con ",
+        " según ",
+        " ventas ",
+        " ingresos ",
+        " órdenes ",
+        " recomendaciones ",
+    )
+    return sum(1 for m in markers if m in t)
+
+
+def _english_marker_score(text: str) -> int:
+    t = f" {text.lower()} "
+    markers = (
+        " the ",
+        " and ",
+        " with ",
+        " for ",
+        " week ",
+        " now ",
+        " let me ",
+        " orders ",
+        " visits ",
+        " revenue ",
+        " clear way ",
+    )
+    return sum(1 for m in markers if m in t)
+
+
+def _sanitize_language_noise(text: str) -> str:
+    """
+    Elimina bloques en inglés que aparecen como duplicado/noise
+    después de una respuesta principal en español.
+    """
+    if not text:
+        return text
+
+    cleaned_lines = []
+    for raw in text.splitlines():
+        if _english_noise_line(raw):
+            continue
+        cleaned_lines.append(raw)
+    cleaned = "\n".join(cleaned_lines).strip()
+    if not cleaned:
+        return text.strip()
+
+    paragraphs = [p.strip() for p in re.split(r"\n\s*\n", cleaned) if p.strip()]
+    if not paragraphs:
+        return cleaned
+
+    has_spanish = any(_spanish_marker_score(p) > _english_marker_score(p) for p in paragraphs)
+    has_english = any(_english_marker_score(p) > _spanish_marker_score(p) for p in paragraphs)
+    if not (has_spanish and has_english):
+        return cleaned
+
+    first_spanish_idx = 0
+    for i, p in enumerate(paragraphs):
+        if _spanish_marker_score(p) > _english_marker_score(p):
+            first_spanish_idx = i
+            break
+
+    kept: List[str] = []
+    for i, p in enumerate(paragraphs):
+        en = _english_marker_score(p)
+        es = _spanish_marker_score(p)
+        is_predominantly_english = en >= 2 and es == 0
+        if i > first_spanish_idx and is_predominantly_english:
+            continue
+        kept.append(p)
+
+    return "\n\n".join(kept).strip()
 
 
 def _collect_agent_text_fragments(body: Any, limit: int = 10) -> List[str]:
@@ -601,6 +697,7 @@ def _parse_agent_run_body(body: Dict[str, Any]) -> Tuple[str, Optional[str], Lis
         narrative = "\n\n".join(fragments[:3]).strip()
     narrative = _sanitize_english_preamble(narrative)
     narrative = _sanitize_brand_terms(narrative)
+    narrative = _sanitize_language_noise(narrative)
     if body.get("response_metadata"):
         extra["response_metadata"] = body.get("response_metadata")
     if body.get("thread_id") is not None:
