@@ -2,7 +2,7 @@
 
 import React from 'react';
 import dynamic from 'next/dynamic';
-import type { EChartsOption, SeriesOption } from 'echarts';
+import type { EChartsOption } from 'echarts';
 import { ChartConfig } from '@/types/synapse';
 
 interface Props {
@@ -27,6 +27,7 @@ export const ChartModule: React.FC<Props> = ({ config }) => {
   }));
 
   const label = config.metrics_label;
+  const hasMultiSeries = Array.isArray(config.series) && config.series.length > 1;
   const title =
     config.type === 'bar'
       ? `Comparativo de ${label}`
@@ -35,7 +36,7 @@ export const ChartModule: React.FC<Props> = ({ config }) => {
       : `Tendencia de ${label}`;
   const xAxisTitle = config.x_axis_label || 'Dimensión';
 
-  const series: SeriesOption[] =
+  const series =
     config.type === 'donut'
       ? [
           {
@@ -52,27 +53,49 @@ export const ChartModule: React.FC<Props> = ({ config }) => {
           },
         ]
       : [
-          {
-            type: config.type === 'line' ? 'line' : 'bar',
-            name: label,
-            data: chartData.map((d) => d.value),
-            smooth: config.type === 'line',
-            showSymbol: config.type === 'line',
-            symbolSize: 8,
-            lineStyle: { width: 3, color: PALETTE[0] },
-            itemStyle: { color: PALETTE[0] },
-            areaStyle:
-              config.type === 'line'
-                ? {
-                    opacity: 0.12,
-                    color: PALETTE[0],
-                  }
-                : undefined,
-            barMaxWidth: 40,
-            emphasis: {
-              focus: 'series',
-            },
-          },
+          ...(hasMultiSeries
+            ? (config.series || []).map((s, idx) => ({
+                type: config.type === 'line' ? 'line' : 'bar',
+                name: s.name,
+                data: s.values,
+                smooth: config.type === 'line',
+                showSymbol: config.type === 'line',
+                symbolSize: 8,
+                lineStyle: { width: 3, color: PALETTE[idx % PALETTE.length] },
+                itemStyle: { color: PALETTE[idx % PALETTE.length] },
+                areaStyle:
+                  config.type === 'line'
+                    ? {
+                        opacity: 0.1,
+                        color: PALETTE[idx % PALETTE.length],
+                      }
+                    : undefined,
+                barMaxWidth: 32,
+                emphasis: { focus: 'series' },
+              }))
+            : [
+                {
+                  type: config.type === 'line' ? 'line' : 'bar',
+                  name: label,
+                  data: chartData.map((d) => d.value),
+                  smooth: config.type === 'line',
+                  showSymbol: config.type === 'line',
+                  symbolSize: 8,
+                  lineStyle: { width: 3, color: PALETTE[0] },
+                  itemStyle: { color: PALETTE[0] },
+                  areaStyle:
+                    config.type === 'line'
+                      ? {
+                          opacity: 0.12,
+                          color: PALETTE[0],
+                        }
+                      : undefined,
+                  barMaxWidth: 40,
+                  emphasis: {
+                    focus: 'series',
+                  },
+                },
+              ]),
         ];
 
   const option: EChartsOption = {
@@ -173,7 +196,7 @@ export const ChartModule: React.FC<Props> = ({ config }) => {
               end: chartData.length > 14 ? 55 : 100,
             },
           ],
-    series,
+    series: series as NonNullable<EChartsOption['series']>,
   };
 
   return (

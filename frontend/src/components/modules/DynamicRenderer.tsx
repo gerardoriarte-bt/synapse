@@ -6,6 +6,7 @@ import { ActionToolbar } from './ActionToolbar';
 import { AlertCircle } from 'lucide-react';
 import { inferChartConfigFromRawData } from '@/lib/chart-inference';
 import { MarkdownNarrative } from './MarkdownNarrative';
+import { resolveAutoChartIntent } from '@/lib/chart-intent';
 
 interface Props {
   data: SynapseResponse;
@@ -14,6 +15,12 @@ interface Props {
 export const DynamicRenderer: React.FC<Props> = ({ data }) => {
   const { narrative, render_type, chart_config, raw_data, response_id } = data;
   const inferredChartConfig = chart_config ?? inferChartConfigFromRawData(raw_data);
+  const chartIntent = resolveAutoChartIntent({
+    rawData: raw_data,
+    narrative,
+    explicitChartConfig: chart_config,
+  });
+  const smartChartConfig = chartIntent.chartConfig ?? inferredChartConfig;
   const extraFragments = (data.cortex_analyst?.agent_text_fragments ?? []).filter(
     (frag) => frag.trim() && frag.trim() !== narrative.trim()
   );
@@ -21,8 +28,11 @@ export const DynamicRenderer: React.FC<Props> = ({ data }) => {
   const renderModule = () => {
     switch (render_type) {
       case 'chart':
-        return inferredChartConfig ? (
-          <ChartModule config={inferredChartConfig} />
+        return smartChartConfig ? (
+          <div className="space-y-2">
+            <ChartModule config={smartChartConfig} />
+            <p className="text-xs text-zinc-500">{chartIntent.reason}</p>
+          </div>
         ) : (
           <RenderError message="Faltan datos de configuración para el gráfico." />
         );
@@ -30,7 +40,12 @@ export const DynamicRenderer: React.FC<Props> = ({ data }) => {
       case 'table':
         return raw_data ? (
           <div className="space-y-4">
-            {inferredChartConfig && <ChartModule config={inferredChartConfig} />}
+            {smartChartConfig && (
+              <div className="space-y-2">
+                <ChartModule config={smartChartConfig} />
+                <p className="text-xs text-zinc-500">{chartIntent.reason}</p>
+              </div>
+            )}
             <TableModule data={raw_data} />
           </div>
         ) : (
@@ -38,7 +53,18 @@ export const DynamicRenderer: React.FC<Props> = ({ data }) => {
         );
 
       case 'text':
-        return null;
+        if (!raw_data || raw_data.length === 0 || !smartChartConfig || !chartIntent.shouldRender) {
+          return null;
+        }
+        return (
+          <div className="space-y-4">
+            <div className="space-y-2">
+              <ChartModule config={smartChartConfig} />
+              <p className="text-xs text-zinc-500">{chartIntent.reason}</p>
+            </div>
+            <TableModule data={raw_data} />
+          </div>
+        );
 
       default:
         console.warn(`[Synapse] Render type "${render_type}" no reconocido.`);

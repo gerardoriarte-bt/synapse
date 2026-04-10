@@ -4,6 +4,10 @@ export interface ChartConfig {
   y_axis: number[];
   metrics_label: string;
   x_axis_label?: string;
+  series?: Array<{
+    name: string;
+    values: number[];
+  }>;
 }
 
 export interface RecommendedAction {

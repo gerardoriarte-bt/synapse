@@ -5,6 +5,7 @@ import { ChartModule } from './ChartModule';
 import { TableModule } from './TableModule';
 import { inferChartConfigFromRawData } from '@/lib/chart-inference';
 import { MarkdownNarrative } from './MarkdownNarrative';
+import { resolveAutoChartIntent } from '@/lib/chart-intent';
 
 interface Props {
   data: SynapseResponse | null;
@@ -32,7 +33,13 @@ export const IntelligenceDashboard: React.FC<Props> = ({ data, isLoading }) => {
     </div>
   );
 
-  const smartChartConfig = data.chart_config ?? inferChartConfigFromRawData(data.raw_data);
+  const inferredChartConfig = data.chart_config ?? inferChartConfigFromRawData(data.raw_data);
+  const chartIntent = resolveAutoChartIntent({
+    rawData: data.raw_data,
+    narrative: data.narrative,
+    explicitChartConfig: data.chart_config,
+  });
+  const smartChartConfig = chartIntent.chartConfig ?? inferredChartConfig;
   const extraFragments = (data.cortex_analyst?.agent_text_fragments ?? []).filter(
     (frag) => frag.trim() && frag.trim() !== data.narrative.trim()
   );
@@ -53,7 +60,12 @@ export const IntelligenceDashboard: React.FC<Props> = ({ data, isLoading }) => {
           ))}
         </section>
       )}
-      {smartChartConfig && <ChartModule config={smartChartConfig} />}
+      {smartChartConfig && (
+        <div className="space-y-2">
+          <ChartModule config={smartChartConfig} />
+          <p className="text-xs text-zinc-500">{chartIntent.reason}</p>
+        </div>
+      )}
       {data.raw_data && data.raw_data.length > 0 && <TableModule data={data.raw_data} />}
     </div>
   );
