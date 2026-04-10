@@ -22,7 +22,9 @@ const INTENT_KEYWORDS = [
   'grafico',
   'gráfico',
   'visualiza',
+  'visualización',
   'visualizar',
+  'fuentes',
   'chart',
   'graph',
   'analiza',
@@ -108,18 +110,20 @@ export const resolveAutoChartIntent = ({
   const hasIntentKeyword = INTENT_KEYWORDS.some((k) => lowerText.includes(k));
 
   let score = 0;
-  score += inferred ? 0.45 : 0.38; // inferencia desde raw_data o markdown
+  score += inferred ? 0.45 : 0.42; // inferencia desde raw_data o markdown
   if (rows >= 3) score += 0.15;
   if (xCount >= 3) score += 0.12;
   if (yVar > 0) score += 0.1;
   if (hasIntentKeyword) score += 0.18;
+  if (!inferred && markdownInferred && xCount >= 3) score += 0.12;
 
   // Evita auto-chart para distribuciones de muy pocos puntos sin intención.
   if (xCount < 2) score = 0;
   if (xCount === 2 && !hasIntentKeyword) score -= 0.1;
 
   const confidence = clamp01(score);
-  const shouldRender = confidence >= 0.65;
+  const threshold = markdownInferred ? 0.55 : 0.65;
+  const shouldRender = confidence >= threshold;
 
   return {
     shouldRender,
