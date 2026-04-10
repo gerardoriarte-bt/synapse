@@ -46,6 +46,23 @@ const INTENT_KEYWORDS = [
   'breakdown',
 ];
 
+const SHARE_KEYWORDS = [
+  'porcentaje',
+  'porcentual',
+  'participacion',
+  'participación',
+  'distribucion',
+  'distribución',
+  'mix',
+  'composicion',
+  'composición',
+  'share',
+  'contribucion',
+  'contribución',
+];
+
+const TREND_KEYWORDS = ['tendencia', 'evolucion', 'evolución', 'diario', 'mensual', 'semanal', 'timeline'];
+
 const clamp01 = (v: number): number => Math.max(0, Math.min(1, v));
 
 const variance = (values: number[]): number => {
@@ -58,8 +75,14 @@ const variance = (values: number[]): number => {
 const buildReason = (
   type: ChartConfig['type'],
   confidence: number,
-  explicit: boolean
+  explicit: boolean,
+  semanticOverride = false
 ): string => {
+  if (semanticOverride && type === 'donut') {
+    return `Se eligió donut por semántica de participación/distribución detectada (confianza ${Math.round(
+      confidence * 100
+    )}%).`;
+  }
   if (explicit) return 'Se muestra el gráfico configurado en la respuesta.';
   if (type === 'line') {
     return `Se eligió línea por patrón temporal detectado (confianza ${Math.round(
@@ -76,23 +99,42 @@ const buildReason = (
   )}%).`;
 };
 
+const shouldPreferDonut = (text: string, config: ChartConfig): boolean => {
+  const lower = (text || '').toLowerCase();
+  if (!SHARE_KEYWORDS.some((k) => lower.includes(k))) return false;
+  if (TREND_KEYWORDS.some((k) => lower.includes(k))) return false;
+  if (config.type === 'line') return false;
+  if (Array.isArray(config.series) && config.series.length > 1) return false;
+  if (config.x_axis.length < 2 || config.x_axis.length > 8) return false;
+  if (config.y_axis.some((v) => v < 0)) return false;
+  return true;
+};
+
 export const resolveAutoChartIntent = ({
   rawData,
   narrative,
   explicitChartConfig,
 }: IntentInput): IntentResult => {
+  const lowerText = (narrative || '').toLowerCase();
   if (explicitChartConfig) {
+    const semanticDonut = shouldPreferDonut(lowerText, explicitChartConfig);
+    const normalizedExplicit = semanticDonut
+      ? { ...explicitChartConfig, type: 'donut' as const }
+      : explicitChartConfig;
     return {
       shouldRender: true,
       confidence: 1,
-      reason: buildReason(explicitChartConfig.type, 1, true),
-      chartConfig: explicitChartConfig,
+      reason: buildReason(normalizedExplicit.type, 1, true, semanticDonut),
+      chartConfig: normalizedExplicit,
     };
   }
 
   const inferred = inferChartConfigFromRawData(rawData);
   const markdownInferred = !inferred ? inferChartConfigFromMarkdownTable(narrative) : null;
-  const selected = inferred ?? markdownInferred;
+  const selectedBase = inferred ?? markdownInferred;
+  const semanticDonut = selectedBase ? shouldPreferDonut(lowerText, selectedBase) : false;
+  const selected =
+    selectedBase && semanticDonut ? ({ ...selectedBase, type: 'donut' as const } as ChartConfig) : selectedBase;
 
   if (!selected) {
     return {
@@ -106,7 +148,6 @@ export const resolveAutoChartIntent = ({
   const rows = Array.isArray(rawData) ? rawData.length : 0;
   const xCount = selected.x_axis.length;
   const yVar = variance(selected.y_axis);
-  const lowerText = (narrative || '').toLowerCase();
   const hasIntentKeyword = INTENT_KEYWORDS.some((k) => lowerText.includes(k));
 
   let score = 0;
@@ -128,7 +169,7 @@ export const resolveAutoChartIntent = ({
   return {
     shouldRender,
     confidence,
-    reason: buildReason(selected.type, confidence, false),
+    reason: buildReason(selected.type, confidence, false, semanticDonut),
     chartConfig: shouldRender ? selected : null,
   };
 };

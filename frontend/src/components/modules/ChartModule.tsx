@@ -341,7 +341,7 @@ export const ChartModule: React.FC<Props> = ({ config }) => {
           {chartTheme === 'dark' ? 'Dark' : 'Light'}
         </button>
       </div>
-      <div className="h-72">
+      <div className="h-72 xl:h-[26rem]">
         <ReactECharts
           option={option}
           style={{ height: '100%', width: '100%' }}

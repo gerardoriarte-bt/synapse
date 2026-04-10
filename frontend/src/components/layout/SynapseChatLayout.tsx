@@ -56,8 +56,8 @@ export const SynapseChatLayout: React.FC<Props> = ({ children, onViewChange, cur
           </div>
         </header>
 
-        <div className="flex-grow overflow-y-auto px-10 py-12 scrollbar-hide">
-          <div className="max-w-5xl mx-auto w-full">
+        <div className="flex-grow overflow-y-auto px-6 xl:px-10 py-12 scrollbar-hide">
+          <div className="max-w-[92rem] mx-auto w-full">
             {children}
           </div>
         </div>

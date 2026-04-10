@@ -75,8 +75,8 @@ export const DynamicRenderer: React.FC<Props> = ({ data }) => {
 
   return (
     <div className="w-full space-y-6 p-6 bg-zinc-900/30 border border-zinc-800 rounded-2xl animate-in zoom-in-95 duration-500">
-      <section className={showChart ? "grid gap-5 lg:grid-cols-12" : ""}>
-        <div className={showChart ? "lg:col-span-7 space-y-4" : "space-y-4"}>
+      <section className={showChart ? "grid gap-5 xl:grid-cols-12" : ""}>
+        <div className={showChart ? "xl:col-span-6 2xl:col-span-7 space-y-4" : "space-y-4"}>
           <div className="rounded-xl border border-zinc-800/70 bg-zinc-950/40 p-5">
             <MarkdownNarrative content={narrative} hideTables={Boolean(smartChartConfig)} />
           </div>
@@ -94,7 +94,7 @@ export const DynamicRenderer: React.FC<Props> = ({ data }) => {
           )}
         </div>
         {showChart && (
-          <aside className="lg:col-span-5 lg:sticky lg:top-6 lg:max-h-[calc(100vh-5rem)] lg:overflow-y-auto lg:pr-1 h-fit">
+          <aside className="xl:col-span-6 2xl:col-span-5 xl:sticky xl:top-6 xl:max-h-[calc(100vh-5rem)] xl:overflow-y-auto xl:pr-1 h-fit">
             {renderModule()}
           </aside>
         )}
