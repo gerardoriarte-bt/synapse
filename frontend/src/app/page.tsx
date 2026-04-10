@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useState, useRef, useEffect } from 'react';
+import Image from 'next/image';
 import { SynapseChatLayout } from '@/components/layout/SynapseChatLayout';
 import { DynamicRenderer } from '@/components/modules/DynamicRenderer';
 import { IntelligenceDashboard } from '@/components/modules/IntelligenceDashboard';
@@ -114,6 +115,8 @@ export default function Home() {
     }
   };
 
+  const showLanding = view === 'chat' && messages.length === 0 && !isLoading;
+
   return (
     <SynapseChatLayout
       currentView={view}
@@ -150,16 +153,24 @@ export default function Home() {
         ) : (
           /* VISTA DE CHAT (Existente) */
           <div className="flex flex-col space-y-12">
-            {messages.length === 0 && !isLoading && (
+            {showLanding && (
               <div className="flex flex-col items-center justify-center pt-20 text-center space-y-8 animate-in fade-in zoom-in duration-700">
                 <div className="w-20 h-20 rounded-[2.5rem] bg-indigo-600/10 border border-indigo-500/20 flex items-center justify-center shadow-2xl shadow-indigo-500/10 relative overflow-hidden">
                    <div className="absolute inset-0 bg-gradient-to-tr from-indigo-500/10 to-transparent animate-pulse" />
                    <Sparkles className="text-indigo-400" size={36} />
                 </div>
                 <div className="space-y-3">
-                  <h1 className="text-5xl font-black tracking-tighter text-white">Synapse Analyst</h1>
+                  <div className="mx-auto relative w-[360px] h-20 max-w-[85vw]">
+                    <Image
+                      src="/SYNAPSE BT COLORS - LIGHT BKG.png"
+                      alt="Synapse Logo"
+                      fill
+                      className="object-contain"
+                      priority
+                    />
+                  </div>
                   <p className="text-zinc-500 max-w-sm mx-auto font-medium leading-relaxed">
-                    Consulta tus datos de negocio y transforma cada respuesta en una lectura ejecutiva accionable.
+                    Consulta los datos de medios y e-commerce en lenguaje natural
                   </p>
                 </div>
                 <div className="flex flex-wrap justify-center gap-3 max-w-xl">
@@ -210,7 +221,14 @@ export default function Home() {
             </div>
 
             {/* Input Estilo Comando */}
-            <form onSubmit={handleSubmit} className="fixed bottom-12 left-1/2 -translate-x-1/2 w-full max-w-3xl px-6 z-40">
+            <form
+              onSubmit={handleSubmit}
+              className={
+                showLanding
+                  ? "w-full max-w-3xl mx-auto px-6 z-40 mt-6"
+                  : "fixed bottom-12 left-1/2 -translate-x-1/2 w-full max-w-3xl px-6 z-40"
+              }
+            >
               <div className="relative group">
                 <div className="absolute -inset-1 bg-gradient-to-r from-indigo-500/20 via-blue-500/10 to-indigo-900/20 rounded-[2rem] blur-2xl opacity-30 group-focus-within:opacity-100 transition duration-700" />
                 <div className="relative flex items-center gap-3 p-2 bg-black/55 backdrop-blur-3xl border border-indigo-300/35 rounded-[1.8rem] shadow-2xl transition-all duration-300 group-focus-within:border-indigo-200/70 group-focus-within:bg-black/75">
