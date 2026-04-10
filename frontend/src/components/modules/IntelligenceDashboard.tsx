@@ -7,6 +7,7 @@ import { inferChartConfigFromRawData } from '@/lib/chart-inference';
 import { MarkdownNarrative } from './MarkdownNarrative';
 import { resolveAutoChartIntent } from '@/lib/chart-intent';
 import { keepSpanishFragments } from '@/lib/narrative-filter';
+import { buildDonutShareHighlights } from '@/lib/chart-insight';
 
 interface Props {
   data: SynapseResponse | null;
@@ -42,11 +43,24 @@ export const IntelligenceDashboard: React.FC<Props> = ({ data, isLoading }) => {
   });
   const smartChartConfig = chartIntent.chartConfig ?? inferredChartConfig;
   const extraFragments = keepSpanishFragments(data.cortex_analyst?.agent_text_fragments ?? [], data.narrative, 3);
+  const shareHighlights = buildDonutShareHighlights(smartChartConfig, 5);
   return (
     <div className="space-y-6 animate-in fade-in duration-700">
       <section className="rounded-xl border border-zinc-800/70 bg-zinc-950/40 p-5">
         <MarkdownNarrative content={data.narrative} hideTables={Boolean(smartChartConfig)} />
       </section>
+      {shareHighlights.length > 0 && (
+        <section className="rounded-xl border border-zinc-800/70 bg-zinc-950/35 p-4">
+          <h5 className="text-xs uppercase tracking-[0.18em] font-black text-zinc-400">
+            Participacion por categoria (%)
+          </h5>
+          <p className="mt-2 text-sm text-zinc-100 leading-relaxed">
+            {shareHighlights
+              .map((item) => `${item.label}: ${item.pct.toFixed(1)}%`)
+              .join(' · ')}
+          </p>
+        </section>
+      )}
       {extraFragments.length > 0 && (
         <section className="space-y-3">
           {extraFragments.slice(0, 3).map((fragment, idx) => (
