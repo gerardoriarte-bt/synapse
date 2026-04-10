@@ -1,9 +1,10 @@
 'use client';
 
-import React from 'react';
+import React, { useState } from 'react';
 import dynamic from 'next/dynamic';
 import type { EChartsOption } from 'echarts';
 import { ChartConfig } from '@/types/synapse';
+import { Moon, Sun } from 'lucide-react';
 
 interface Props {
   config: ChartConfig;
@@ -26,6 +27,66 @@ const PALETTE = [
   '#D95D15',
 ];
 const PRIMARY_ACCENT = '#2B82CC';
+const VALUE_GRADIENT = [
+  '#1F6AA5',
+  '#2B82CC',
+  '#3F9DE3',
+  '#8EC9F3',
+  '#C9E7FB',
+  '#F4FAFF',
+  '#FAF0E2',
+  '#F7DDB8',
+  '#F4BE84',
+  '#F39A4A',
+  '#EE7422',
+  '#D95D15',
+];
+
+type ChartTheme = 'dark' | 'light';
+
+const THEME_COLORS: Record<
+  ChartTheme,
+  {
+    tooltipBg: string;
+    tooltipBorder: string;
+    tooltipText: string;
+    legendText: string;
+    axisText: string;
+    axisLine: string;
+    gridLine: string;
+    zoomBorder: string;
+    zoomBg: string;
+    zoomFill: string;
+    chartSurface: string;
+  }
+> = {
+  dark: {
+    tooltipBg: '#09090b',
+    tooltipBorder: '#27272a',
+    tooltipText: '#f4f4f5',
+    legendText: '#a1a1aa',
+    axisText: '#a1a1aa',
+    axisLine: '#3f3f46',
+    gridLine: '#27272a',
+    zoomBorder: '#3f3f46',
+    zoomBg: '#18181b',
+    zoomFill: 'rgba(43,130,204,0.22)',
+    chartSurface: 'bg-gradient-to-b from-zinc-950 to-zinc-900/90 border-zinc-800',
+  },
+  light: {
+    tooltipBg: '#ffffff',
+    tooltipBorder: '#d4d4d8',
+    tooltipText: '#18181b',
+    legendText: '#3f3f46',
+    axisText: '#52525b',
+    axisLine: '#d4d4d8',
+    gridLine: '#e4e4e7',
+    zoomBorder: '#cbd5e1',
+    zoomBg: '#f4f4f5',
+    zoomFill: 'rgba(43,130,204,0.15)',
+    chartSurface: 'bg-gradient-to-b from-zinc-100 to-zinc-50 border-zinc-300',
+  },
+};
 
 const formatNumber = (value: number): string => {
   if (!Number.isFinite(value)) return '0';
@@ -35,6 +96,8 @@ const formatNumber = (value: number): string => {
 };
 
 export const ChartModule: React.FC<Props> = ({ config }) => {
+  const [chartTheme, setChartTheme] = useState<ChartTheme>('dark');
+  const theme = THEME_COLORS[chartTheme];
   const chartData = config.x_axis.map((x, i) => ({
     name: String(x),
     value: config.y_axis[i] ?? 0,
@@ -49,6 +112,21 @@ export const ChartModule: React.FC<Props> = ({ config }) => {
       ? `Distribución de ${label}`
       : `Tendencia de ${label}`;
   const xAxisTitle = config.x_axis_label || 'Dimensión';
+  const minVal = Math.min(...chartData.map((d) => d.value));
+  const maxVal = Math.max(...chartData.map((d) => d.value));
+  const valueColor = (v: number): string => {
+    if (!Number.isFinite(v) || maxVal <= minVal) return VALUE_GRADIENT[0];
+    const normalized = (v - minVal) / (maxVal - minVal);
+    const idx = Math.max(
+      0,
+      Math.min(VALUE_GRADIENT.length - 1, Math.round(normalized * (VALUE_GRADIENT.length - 1)))
+    );
+    return VALUE_GRADIENT[idx];
+  };
+  const barDataWithColor = chartData.map((d) => ({
+    value: d.value,
+    itemStyle: { color: valueColor(d.value) },
+  }));
 
   const series =
     config.type === 'donut'
@@ -57,11 +135,17 @@ export const ChartModule: React.FC<Props> = ({ config }) => {
             type: 'pie',
             radius: ['45%', '72%'],
             center: ['50%', '50%'],
-            data: chartData.map((d) => ({ name: d.name, value: d.value })),
+            data: chartData
+              .map((d) => ({ name: d.name, value: d.value }))
+              .sort((a, b) => a.value - b.value)
+              .map((d) => ({
+                ...d,
+                itemStyle: { color: valueColor(d.value) },
+              })),
             padAngle: 1,
             itemStyle: { borderColor: '#09090b', borderWidth: 2 },
             label: {
-              color: '#d4d4d8',
+              color: chartTheme === 'dark' ? '#d4d4d8' : '#27272a',
               formatter: '{b}: {d}%',
             },
           },
@@ -71,7 +155,13 @@ export const ChartModule: React.FC<Props> = ({ config }) => {
             ? (config.series || []).map((s, idx) => ({
                 type: config.type === 'line' ? 'line' : 'bar',
                 name: s.name,
-                data: s.values,
+                data:
+                  config.type === 'bar'
+                    ? s.values.map((v) => ({
+                        value: v,
+                        itemStyle: { color: valueColor(v) },
+                      }))
+                    : s.values,
                 smooth: config.type === 'line',
                 showSymbol: config.type === 'line',
                 symbolSize: 8,
@@ -91,7 +181,7 @@ export const ChartModule: React.FC<Props> = ({ config }) => {
                 {
                   type: config.type === 'line' ? 'line' : 'bar',
                   name: label,
-                  data: chartData.map((d) => d.value),
+                  data: config.type === 'bar' ? barDataWithColor : chartData.map((d) => d.value),
                   smooth: config.type === 'line',
                   showSymbol: config.type === 'line',
                   symbolSize: 8,
@@ -121,15 +211,15 @@ export const ChartModule: React.FC<Props> = ({ config }) => {
     },
     tooltip: {
       trigger: config.type === 'donut' ? 'item' : 'axis',
-      backgroundColor: '#09090b',
-      borderColor: '#27272a',
+      backgroundColor: theme.tooltipBg,
+      borderColor: theme.tooltipBorder,
       borderWidth: 1,
-      textStyle: { color: '#f4f4f5' },
+      textStyle: { color: theme.tooltipText },
       valueFormatter: (value) => formatNumber(Number(value)),
     },
     legend: {
       top: 8,
-      textStyle: { color: '#a1a1aa', fontSize: 11 },
+      textStyle: { color: theme.legendText, fontSize: 11 },
       type: 'scroll',
     },
     toolbox: {
@@ -164,11 +254,11 @@ export const ChartModule: React.FC<Props> = ({ config }) => {
             nameGap: 34,
             data: chartData.map((d) => d.name),
             axisLabel: {
-              color: '#a1a1aa',
+              color: theme.axisText,
               rotate: chartData.length > 8 ? 25 : 0,
               hideOverlap: true,
             },
-            axisLine: { lineStyle: { color: '#3f3f46' } },
+            axisLine: { lineStyle: { color: theme.axisLine } },
             axisTick: { show: false },
           },
     yAxis:
@@ -180,11 +270,11 @@ export const ChartModule: React.FC<Props> = ({ config }) => {
             nameLocation: 'middle',
             nameGap: 44,
             axisLabel: {
-              color: '#a1a1aa',
+              color: theme.axisText,
               formatter: (v: number) => formatNumber(v),
             },
             splitLine: {
-              lineStyle: { color: '#27272a', type: 'dashed' },
+              lineStyle: { color: theme.gridLine, type: 'dashed' },
             },
           },
     dataZoom:
@@ -200,12 +290,12 @@ export const ChartModule: React.FC<Props> = ({ config }) => {
               type: 'slider',
               bottom: 8,
               height: 14,
-              borderColor: '#3f3f46',
-              backgroundColor: '#18181b',
+              borderColor: theme.zoomBorder,
+              backgroundColor: theme.zoomBg,
               handleStyle: {
                 color: PRIMARY_ACCENT,
               },
-              fillerColor: 'rgba(43,130,204,0.22)',
+              fillerColor: theme.zoomFill,
               start: 0,
               end: chartData.length > 14 ? 55 : 100,
             },
@@ -214,14 +304,25 @@ export const ChartModule: React.FC<Props> = ({ config }) => {
   };
 
   return (
-    <div className="w-full space-y-3 bg-gradient-to-b from-zinc-950 to-zinc-900/90 p-4 border border-zinc-800 rounded-2xl shadow-inner">
-      <div className="space-y-1">
-        <h4 className="text-sm font-extrabold text-zinc-100 tracking-tight">{title}</h4>
-        <p className="text-[11px] text-zinc-400">
+    <div className={`w-full space-y-3 p-4 border rounded-2xl shadow-inner ${theme.chartSurface}`}>
+      <div className="flex items-start justify-between gap-3">
+        <div className="space-y-1">
+          <h4 className={`text-sm font-extrabold tracking-tight ${chartTheme === 'dark' ? 'text-zinc-100' : 'text-zinc-900'}`}>{title}</h4>
+          <p className={`text-[11px] ${chartTheme === 'dark' ? 'text-zinc-400' : 'text-zinc-600'}`}>
           Eje Y: <span className="text-zinc-200 font-semibold">{label}</span> · Eje X:{' '}
           <span className="text-zinc-200 font-semibold">{xAxisTitle}</span> · Puntos analizados:{' '}
           <span className="text-zinc-200 font-semibold">{chartData.length}</span>
-        </p>
+          </p>
+        </div>
+        <button
+          type="button"
+          onClick={() => setChartTheme((prev) => (prev === 'dark' ? 'light' : 'dark'))}
+          className="inline-flex items-center gap-2 rounded-lg border border-zinc-600/40 bg-zinc-900/40 px-3 py-1.5 text-[11px] font-semibold text-zinc-200 hover:border-zinc-500"
+          title="Cambiar modo de gráfico"
+        >
+          {chartTheme === 'dark' ? <Moon size={13} /> : <Sun size={13} />}
+          {chartTheme === 'dark' ? 'Dark' : 'Light'}
+        </button>
       </div>
       <div className="h-72">
         <ReactECharts
