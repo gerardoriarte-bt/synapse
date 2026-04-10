@@ -537,6 +537,23 @@ def _english_noise_line(line: str) -> bool:
     return any(re.match(p, s) for p in patterns)
 
 
+def _internal_instruction_paragraph(paragraph: str) -> bool:
+    p = (paragraph or "").strip().lower()
+    if not p:
+        return False
+    markers = (
+        "skill: system_chart_workflow",
+        "description: chart generation workflow",
+        "instructions",
+        "chart workflow",
+        "when to generate charts",
+        "when not to chart",
+        "mandatory visualization rules",
+        "chart citing format",
+    )
+    return any(m in p for m in markers)
+
+
 def _spanish_marker_score(text: str) -> int:
     t = f" {text.lower()} "
     markers = (
@@ -593,6 +610,9 @@ def _sanitize_language_noise(text: str) -> str:
         return text.strip()
 
     paragraphs = [p.strip() for p in re.split(r"\n\s*\n", cleaned) if p.strip()]
+    if not paragraphs:
+        return cleaned
+    paragraphs = [p for p in paragraphs if not _internal_instruction_paragraph(p)]
     if not paragraphs:
         return cleaned
 

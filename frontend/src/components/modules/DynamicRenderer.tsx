@@ -21,6 +21,7 @@ export const DynamicRenderer: React.FC<Props> = ({ data }) => {
     explicitChartConfig: chart_config,
   });
   const smartChartConfig = chartIntent.chartConfig ?? inferredChartConfig;
+  const showChart = Boolean(smartChartConfig && chartIntent.shouldRender);
   const extraFragments = (data.cortex_analyst?.agent_text_fragments ?? []).filter(
     (frag) => frag.trim() && frag.trim() !== narrative.trim()
   );
@@ -74,24 +75,31 @@ export const DynamicRenderer: React.FC<Props> = ({ data }) => {
 
   return (
     <div className="w-full space-y-6 p-6 bg-zinc-900/30 border border-zinc-800 rounded-2xl animate-in zoom-in-95 duration-500">
-      <section className="rounded-xl border border-zinc-800/70 bg-zinc-950/40 p-5">
-        <MarkdownNarrative content={narrative} hideTables={Boolean(smartChartConfig)} />
+      <section className={showChart ? "grid gap-5 lg:grid-cols-12" : ""}>
+        <div className={showChart ? "lg:col-span-7 space-y-4" : "space-y-4"}>
+          <div className="rounded-xl border border-zinc-800/70 bg-zinc-950/40 p-5">
+            <MarkdownNarrative content={narrative} hideTables={Boolean(smartChartConfig)} />
+          </div>
+          {extraFragments.length > 0 && (
+            <section className="space-y-3">
+              {extraFragments.slice(0, 2).map((fragment, idx) => (
+                <article
+                  key={`${response_id}-fragment-${idx}`}
+                  className="rounded-xl border border-zinc-800/70 bg-zinc-950/30 p-4"
+                >
+                  <MarkdownNarrative content={fragment} className="text-zinc-200" />
+                </article>
+              ))}
+            </section>
+          )}
+        </div>
+        {showChart && (
+          <aside className="lg:col-span-5 lg:sticky lg:top-6 h-fit">
+            {renderModule()}
+          </aside>
+        )}
       </section>
-      {extraFragments.length > 0 && (
-        <section className="space-y-3">
-          {extraFragments.slice(0, 3).map((fragment, idx) => (
-            <article
-              key={`${response_id}-fragment-${idx}`}
-              className="rounded-xl border border-zinc-800/70 bg-zinc-950/30 p-4"
-            >
-              <MarkdownNarrative content={fragment} className="text-zinc-200" />
-            </article>
-          ))}
-        </section>
-      )}
-      <section className="min-h-[50px] w-full">
-        {renderModule()}
-      </section>
+      {!showChart && <section className="min-h-[50px] w-full">{renderModule()}</section>}
       <div className="pt-2">
         <ActionToolbar responseId={response_id} data={raw_data} />
       </div>
