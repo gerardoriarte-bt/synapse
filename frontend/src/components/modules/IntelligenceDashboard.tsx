@@ -46,7 +46,7 @@ export const IntelligenceDashboard: React.FC<Props> = ({ data, isLoading }) => {
   return (
     <div className="space-y-6 animate-in fade-in duration-700">
       <section className="rounded-xl border border-zinc-800/70 bg-zinc-950/40 p-5">
-        <MarkdownNarrative content={data.narrative} />
+        <MarkdownNarrative content={data.narrative} hideTables={Boolean(smartChartConfig)} />
       </section>
       {extraFragments.length > 0 && (
         <section className="space-y-3">

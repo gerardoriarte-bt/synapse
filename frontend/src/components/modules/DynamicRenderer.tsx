@@ -75,7 +75,7 @@ export const DynamicRenderer: React.FC<Props> = ({ data }) => {
   return (
     <div className="w-full space-y-6 p-6 bg-zinc-900/30 border border-zinc-800 rounded-2xl animate-in zoom-in-95 duration-500">
       <section className="rounded-xl border border-zinc-800/70 bg-zinc-950/40 p-5">
-        <MarkdownNarrative content={narrative} />
+        <MarkdownNarrative content={narrative} hideTables={Boolean(smartChartConfig)} />
       </section>
       {extraFragments.length > 0 && (
         <section className="space-y-3">

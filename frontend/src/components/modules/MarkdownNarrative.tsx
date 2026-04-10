@@ -5,9 +5,10 @@ import remarkGfm from 'remark-gfm';
 interface Props {
   content: string;
   className?: string;
+  hideTables?: boolean;
 }
 
-export const MarkdownNarrative: React.FC<Props> = ({ content, className }) => {
+export const MarkdownNarrative: React.FC<Props> = ({ content, className, hideTables = false }) => {
   return (
     <div className={className}>
       <ReactMarkdown
@@ -27,11 +28,12 @@ export const MarkdownNarrative: React.FC<Props> = ({ content, className }) => {
             <ol className="mb-3 list-decimal pl-6 text-zinc-100">{children}</ol>
           ),
           li: ({ children }) => <li className="mb-1">{children}</li>,
-          table: ({ children }) => (
-            <div className="my-4 overflow-x-auto rounded-lg border border-zinc-800">
-              <table className="min-w-full border-collapse text-sm">{children}</table>
-            </div>
-          ),
+          table: ({ children }) =>
+            hideTables ? null : (
+              <div className="my-4 overflow-x-auto rounded-lg border border-zinc-800">
+                <table className="min-w-full border-collapse text-sm">{children}</table>
+              </div>
+            ),
           thead: ({ children }) => <thead className="bg-zinc-900/80">{children}</thead>,
           tbody: ({ children }) => <tbody className="bg-zinc-950/40">{children}</tbody>,
           tr: ({ children }) => <tr className="border-b border-zinc-800">{children}</tr>,
