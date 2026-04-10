@@ -94,7 +94,7 @@ export const DynamicRenderer: React.FC<Props> = ({ data }) => {
           )}
         </div>
         {showChart && (
-          <aside className="lg:col-span-5 lg:sticky lg:top-6 h-fit">
+          <aside className="lg:col-span-5 lg:sticky lg:top-6 lg:max-h-[calc(100vh-5rem)] lg:overflow-y-auto lg:pr-1 h-fit">
             {renderModule()}
           </aside>
         )}
