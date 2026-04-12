@@ -58,13 +58,6 @@ export const SynapseChatLayout: React.FC<Props> = ({ children, onViewChange, cur
             onClick={() => onViewChange?.('chat')}
             collapsed={collapsed}
           />
-          <SidebarItem
-            icon={<BarChart3 size={19} />}
-            label="Marketing Intelligence"
-            active={currentView === 'intelligence'}
-            onClick={() => onViewChange?.('intelligence')}
-            collapsed={collapsed}
-          />
         </nav>
 
         {/* Footer Sidebar */}
