@@ -9,6 +9,7 @@ import { MarkdownNarrative } from './MarkdownNarrative';
 import { resolveAutoChartIntent } from '@/lib/chart-intent';
 import { keepSpanishFragments } from '@/lib/narrative-filter';
 import { buildDonutShareHighlights } from '@/lib/chart-insight';
+import { buildChartCandidates } from '@/lib/chart-multi';
 
 interface Props {
   data: SynapseResponse;
@@ -23,31 +24,37 @@ export const DynamicRenderer: React.FC<Props> = ({ data }) => {
     explicitChartConfig: chart_config,
   });
   const smartChartConfig = chartIntent.chartConfig ?? inferredChartConfig;
-  const showChart = Boolean(smartChartConfig && chartIntent.shouldRender);
+  const chartCandidates = buildChartCandidates(smartChartConfig, chartIntent.reason);
+  const chartEnabledByType =
+    render_type === 'chart' || render_type === 'table' || (render_type === 'text' && chartIntent.shouldRender);
+  const showChart = chartEnabledByType && chartCandidates.length > 0;
   const extraFragments = keepSpanishFragments(data.cortex_analyst?.agent_text_fragments ?? [], narrative, 2);
-  const shareHighlights = buildDonutShareHighlights(smartChartConfig, 5);
+  const donutCandidate = chartCandidates.find((c) => c.config.type === 'donut')?.config ?? null;
+  const shareHighlights = buildDonutShareHighlights(donutCandidate, 5);
+
+  const renderChartStack = () =>
+    chartCandidates.length > 0 ? (
+      <div className="space-y-5">
+        {chartCandidates.map((chart, idx) => (
+          <div key={`${response_id}-chart-${chart.config.type}-${idx}`} className="space-y-2">
+            <ChartModule config={chart.config} />
+            <p className="text-xs text-zinc-500">{chart.reason}</p>
+          </div>
+        ))}
+      </div>
+    ) : (
+      <RenderError message="Faltan datos de configuración para el gráfico." />
+    );
 
   const renderModule = () => {
     switch (render_type) {
       case 'chart':
-        return smartChartConfig ? (
-          <div className="space-y-2">
-            <ChartModule config={smartChartConfig} />
-            <p className="text-xs text-zinc-500">{chartIntent.reason}</p>
-          </div>
-        ) : (
-          <RenderError message="Faltan datos de configuración para el gráfico." />
-        );
+        return renderChartStack();
 
       case 'table':
         return raw_data ? (
           <div className="space-y-4">
-            {smartChartConfig && (
-              <div className="space-y-2">
-                <ChartModule config={smartChartConfig} />
-                <p className="text-xs text-zinc-500">{chartIntent.reason}</p>
-              </div>
-            )}
+            {chartCandidates.length > 0 && renderChartStack()}
             <TableModule data={raw_data} />
           </div>
         ) : (
@@ -55,15 +62,12 @@ export const DynamicRenderer: React.FC<Props> = ({ data }) => {
         );
 
       case 'text':
-        if (!smartChartConfig || !chartIntent.shouldRender) {
+        if (chartCandidates.length === 0 || !chartIntent.shouldRender) {
           return null;
         }
         return (
           <div className="space-y-4">
-            <div className="space-y-2">
-              <ChartModule config={smartChartConfig} />
-              <p className="text-xs text-zinc-500">{chartIntent.reason}</p>
-            </div>
+            {renderChartStack()}
             {raw_data && raw_data.length > 0 && <TableModule data={raw_data} />}
           </div>
         );
@@ -79,7 +83,7 @@ export const DynamicRenderer: React.FC<Props> = ({ data }) => {
       <section className={showChart ? "grid gap-5 xl:grid-cols-12" : ""}>
         <div className={showChart ? "xl:col-span-6 2xl:col-span-7 space-y-4" : "space-y-4"}>
           <div className="rounded-xl border border-zinc-800/70 bg-zinc-950/40 p-5">
-            <MarkdownNarrative content={narrative} hideTables={Boolean(smartChartConfig)} />
+            <MarkdownNarrative content={narrative} hideTables={chartCandidates.length > 0} />
           </div>
           {shareHighlights.length > 0 && (
             <section className="rounded-xl border border-zinc-800/70 bg-zinc-950/35 p-4">

@@ -8,6 +8,7 @@ import { MarkdownNarrative } from './MarkdownNarrative';
 import { resolveAutoChartIntent } from '@/lib/chart-intent';
 import { keepSpanishFragments } from '@/lib/narrative-filter';
 import { buildDonutShareHighlights } from '@/lib/chart-insight';
+import { buildChartCandidates } from '@/lib/chart-multi';
 
 interface Props {
   data: SynapseResponse | null;
@@ -42,12 +43,14 @@ export const IntelligenceDashboard: React.FC<Props> = ({ data, isLoading }) => {
     explicitChartConfig: data.chart_config,
   });
   const smartChartConfig = chartIntent.chartConfig ?? inferredChartConfig;
+  const chartCandidates = buildChartCandidates(smartChartConfig, chartIntent.reason);
   const extraFragments = keepSpanishFragments(data.cortex_analyst?.agent_text_fragments ?? [], data.narrative, 3);
-  const shareHighlights = buildDonutShareHighlights(smartChartConfig, 5);
+  const donutCandidate = chartCandidates.find((c) => c.config.type === 'donut')?.config ?? null;
+  const shareHighlights = buildDonutShareHighlights(donutCandidate, 5);
   return (
     <div className="space-y-6 animate-in fade-in duration-700">
       <section className="rounded-xl border border-zinc-800/70 bg-zinc-950/40 p-5">
-        <MarkdownNarrative content={data.narrative} hideTables={Boolean(smartChartConfig)} />
+        <MarkdownNarrative content={data.narrative} hideTables={chartCandidates.length > 0} />
       </section>
       {shareHighlights.length > 0 && (
         <section className="rounded-xl border border-zinc-800/70 bg-zinc-950/35 p-4">
@@ -73,10 +76,14 @@ export const IntelligenceDashboard: React.FC<Props> = ({ data, isLoading }) => {
           ))}
         </section>
       )}
-      {smartChartConfig && (
-        <div className="space-y-2">
-          <ChartModule config={smartChartConfig} />
-          <p className="text-xs text-zinc-500">{chartIntent.reason}</p>
+      {chartCandidates.length > 0 && (
+        <div className="space-y-5">
+          {chartCandidates.map((chart, idx) => (
+            <div key={`${data.response_id}-int-chart-${chart.config.type}-${idx}`} className="space-y-2">
+              <ChartModule config={chart.config} />
+              <p className="text-xs text-zinc-500">{chart.reason}</p>
+            </div>
+          ))}
         </div>
       )}
       {data.raw_data && data.raw_data.length > 0 && <TableModule data={data.raw_data} />}
