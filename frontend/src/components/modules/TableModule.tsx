@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 
 interface Props {
   data: Array<Record<string, unknown>>;
@@ -8,6 +8,9 @@ export const TableModule: React.FC<Props> = ({ data }) => {
   const PAGE_SIZE_OPTIONS = [25, 50, 100];
   const [pageSize, setPageSize] = useState<number>(25);
   const [page, setPage] = useState<number>(1);
+  const pageSizeRef = useRef(pageSize);
+  const pageRef = useRef(page);
+  const printSnapshotRef = useRef<{ pageSize: number; page: number } | null>(null);
 
   const headers = useMemo(() => {
     const ordered: string[] = [];
@@ -30,6 +33,35 @@ export const TableModule: React.FC<Props> = ({ data }) => {
   const end = start + pageSize;
   const rows = data.slice(start, end);
 
+  useEffect(() => {
+    pageSizeRef.current = pageSize;
+  }, [pageSize]);
+
+  useEffect(() => {
+    pageRef.current = page;
+  }, [page]);
+
+  useEffect(() => {
+    const handleBeforePrint = () => {
+      printSnapshotRef.current = { pageSize: pageSizeRef.current, page: pageRef.current };
+      setPageSize(Math.max(totalRows, 1));
+      setPage(1);
+    };
+    const handleAfterPrint = () => {
+      const snapshot = printSnapshotRef.current;
+      if (!snapshot) return;
+      setPageSize(snapshot.pageSize);
+      setPage(snapshot.page);
+      printSnapshotRef.current = null;
+    };
+    window.addEventListener('beforeprint', handleBeforePrint);
+    window.addEventListener('afterprint', handleAfterPrint);
+    return () => {
+      window.removeEventListener('beforeprint', handleBeforePrint);
+      window.removeEventListener('afterprint', handleAfterPrint);
+    };
+  }, [totalRows]);
+
   if (totalRows === 0) return null;
 
   const formatValue = (value: unknown): string => {
@@ -45,8 +77,8 @@ export const TableModule: React.FC<Props> = ({ data }) => {
   };
 
   return (
-    <div className="w-full overflow-hidden border border-zinc-900 rounded-xl bg-zinc-950/50 space-y-0">
-      <div className="flex items-center justify-between px-4 py-3 border-b border-zinc-900 bg-zinc-900/40">
+    <div className="print-keep w-full overflow-hidden border border-zinc-900 rounded-xl bg-zinc-950/50 space-y-0">
+      <div className="no-print flex items-center justify-between px-4 py-3 border-b border-zinc-900 bg-zinc-900/40">
         <p className="text-xs text-zinc-400 font-semibold">
           Mostrando <span className="text-zinc-200">{start + 1}-{Math.min(end, totalRows)}</span> de{' '}
           <span className="text-zinc-200">{totalRows}</span> filas
@@ -92,7 +124,7 @@ export const TableModule: React.FC<Props> = ({ data }) => {
       </div>
 
       {totalPages > 1 && (
-        <div className="flex items-center justify-between px-4 py-3 border-t border-zinc-900 bg-zinc-900/20">
+        <div className="no-print flex items-center justify-between px-4 py-3 border-t border-zinc-900 bg-zinc-900/20">
           <button
             onClick={() => setPage((p) => Math.max(1, p - 1))}
             disabled={safePage <= 1}

@@ -223,11 +223,11 @@ export default function Home() {
             {/* Input Estilo Comando */}
             <form
               onSubmit={handleSubmit}
-              className={
+              className={`no-print ${
                 showLanding
-                  ? "w-full max-w-3xl mx-auto px-6 z-40 mt-6"
-                  : "fixed bottom-12 left-1/2 -translate-x-1/2 w-full max-w-3xl px-6 z-40"
-              }
+                  ? 'w-full max-w-3xl mx-auto px-6 z-40 mt-6'
+                  : 'fixed bottom-12 left-1/2 -translate-x-1/2 w-full max-w-3xl px-6 z-40'
+              }`}
             >
               <div className="relative group">
                 <div className="absolute -inset-1 bg-gradient-to-r from-indigo-500/20 via-blue-500/10 to-indigo-900/20 rounded-[2rem] blur-2xl opacity-30 group-focus-within:opacity-100 transition duration-700" />

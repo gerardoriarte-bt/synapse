@@ -79,14 +79,14 @@ export const DynamicRenderer: React.FC<Props> = ({ data }) => {
   };
 
   return (
-    <div className="w-full space-y-6 p-6 bg-zinc-900/30 border border-zinc-800 rounded-2xl animate-in zoom-in-95 duration-500">
+    <div className="w-full space-y-6 p-6 bg-zinc-900/30 border border-zinc-800 rounded-2xl animate-in zoom-in-95 duration-500 print:!bg-white print:!border-zinc-300">
       <section className={showChart ? "grid gap-5 xl:grid-cols-12" : ""}>
         <div className={showChart ? "xl:col-span-6 2xl:col-span-7 space-y-4" : "space-y-4"}>
-          <div className="rounded-xl border border-zinc-800/70 bg-zinc-950/40 p-5">
+          <div className="print-keep rounded-xl border border-zinc-800/70 bg-zinc-950/40 p-5">
             <MarkdownNarrative content={narrative} hideTables={chartCandidates.length > 0} />
           </div>
           {shareHighlights.length > 0 && (
-            <section className="rounded-xl border border-zinc-800/70 bg-zinc-950/35 p-4">
+            <section className="print-keep rounded-xl border border-zinc-800/70 bg-zinc-950/35 p-4">
               <h5 className="text-xs uppercase tracking-[0.18em] font-black text-zinc-400">
                 Participacion por categoria (%)
               </h5>
@@ -102,7 +102,7 @@ export const DynamicRenderer: React.FC<Props> = ({ data }) => {
               {extraFragments.slice(0, 2).map((fragment, idx) => (
                 <article
                   key={`${response_id}-fragment-${idx}`}
-                  className="rounded-xl border border-zinc-800/70 bg-zinc-950/30 p-4"
+                  className="print-keep rounded-xl border border-zinc-800/70 bg-zinc-950/30 p-4"
                 >
                   <MarkdownNarrative content={fragment} className="text-zinc-200" />
                 </article>

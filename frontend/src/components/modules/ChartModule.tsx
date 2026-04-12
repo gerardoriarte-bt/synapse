@@ -328,7 +328,7 @@ export const ChartModule: React.FC<Props> = ({ config }) => {
   };
 
   return (
-    <div className={`w-full space-y-3 p-4 border rounded-2xl shadow-inner ${theme.chartSurface}`}>
+    <div className={`print-keep w-full space-y-3 p-4 border rounded-2xl shadow-inner ${theme.chartSurface}`}>
       <div className="flex items-start justify-between gap-3">
         <div className="space-y-1">
           <h4 className={`text-sm font-extrabold tracking-tight ${chartTheme === 'dark' ? 'text-zinc-100' : 'text-zinc-900'}`}>{title}</h4>
@@ -341,7 +341,7 @@ export const ChartModule: React.FC<Props> = ({ config }) => {
         <button
           type="button"
           onClick={() => setChartTheme((prev) => (prev === 'dark' ? 'light' : 'dark'))}
-          className={`inline-flex items-center gap-2 rounded-lg border px-3 py-1.5 text-[11px] font-semibold ${
+          className={`no-print inline-flex items-center gap-2 rounded-lg border px-3 py-1.5 text-[11px] font-semibold ${
             chartTheme === 'dark'
               ? 'border-zinc-600/40 bg-zinc-900/40 text-zinc-200 hover:border-zinc-500'
               : 'border-zinc-300 bg-white text-zinc-700 hover:border-zinc-400'

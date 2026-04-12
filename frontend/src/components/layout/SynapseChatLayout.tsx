@@ -70,16 +70,16 @@ export const SynapseChatLayout: React.FC<Props> = ({ children, onViewChange, cur
       </aside>
 
       {/* Área de Contenido Principal con fondo degradado sutil */}
-      <main className="flex-grow flex flex-col relative bg-[linear-gradient(to_bottom,#17283A_0%,#141414_100%)]">
-        <header className="h-20 border-b border-white/10 bg-black/25 backdrop-blur-md sticky top-0 z-20 flex items-center px-10">
+      <main className="synapse-print-main flex-grow flex flex-col relative bg-[linear-gradient(to_bottom,#17283A_0%,#141414_100%)]">
+        <header className="no-print h-20 border-b border-white/10 bg-black/25 backdrop-blur-md sticky top-0 z-20 flex items-center px-10">
           <div className="flex items-center gap-2">
             <div className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
             <h2 className="text-xs font-bold text-zinc-500 uppercase tracking-widest">Synapse Analyst Workspace</h2>
           </div>
         </header>
 
-        <div className="flex-grow overflow-y-auto px-6 xl:px-10 py-12 scrollbar-hide">
-          <div className="max-w-[96rem] mx-auto w-full">
+        <div className="synapse-print-scroll flex-grow overflow-y-auto px-6 xl:px-10 py-12 scrollbar-hide">
+          <div className="synapse-print-content max-w-[96rem] mx-auto w-full">
             {children}
           </div>
         </div>

@@ -43,3 +43,69 @@
 .animate-in {
   animation: zoom-in-95 0.3s ease-out;
 }
+
+@page {
+  size: A4;
+  margin: 12mm;
+}
+
+@media print {
+  html,
+  body {
+    background: #ffffff !important;
+    color: #111827 !important;
+  }
+
+  aside,
+  header,
+  .no-print {
+    display: none !important;
+  }
+
+  .synapse-print-main,
+  .synapse-print-scroll {
+    overflow: visible !important;
+    height: auto !important;
+  }
+
+  .synapse-print-scroll {
+    padding: 0 !important;
+  }
+
+  .synapse-print-content {
+    max-width: 100% !important;
+    width: 100% !important;
+    margin: 0 !important;
+    padding: 0 !important;
+  }
+
+  .print-keep {
+    break-inside: avoid-page !important;
+    page-break-inside: avoid !important;
+  }
+
+  p,
+  li {
+    orphans: 3;
+    widows: 3;
+  }
+
+  table {
+    width: 100% !important;
+    border-collapse: collapse !important;
+  }
+
+  tr,
+  th,
+  td {
+    break-inside: avoid-page !important;
+    page-break-inside: avoid !important;
+  }
+
+  th,
+  td {
+    border: 1px solid #d4d4d8 !important;
+    color: #111827 !important;
+    background: #ffffff !important;
+  }
+}
