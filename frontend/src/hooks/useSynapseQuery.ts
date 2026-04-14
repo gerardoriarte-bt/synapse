@@ -35,7 +35,21 @@ export function useSynapseQuery() {
       });
 
       if (!res.ok) {
-        throw new Error('No se pudo conectar con el motor de Synapse.');
+        let detail = `El servidor respondió ${res.status}.`;
+        try {
+          const errBody = (await res.json()) as { detail?: unknown };
+          const d = errBody?.detail;
+          if (typeof d === 'string' && d.trim()) {
+            detail = d.trim();
+          } else if (Array.isArray(d)) {
+            detail = d
+              .map((item: { msg?: string }) => (typeof item?.msg === 'string' ? item.msg : JSON.stringify(item)))
+              .join(' ');
+          }
+        } catch {
+          /* cuerpo no JSON */
+        }
+        throw new Error(detail);
       }
 
       const data: SynapseResponse = await res.json();
