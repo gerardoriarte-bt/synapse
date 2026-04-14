@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useRef } from 'react';
+import { getApiBaseUrl } from '@/lib/api-base';
 import { SynapseResponse } from '@/types/synapse';
 
 export function useSynapseQuery() {
@@ -10,17 +11,7 @@ export function useSynapseQuery() {
   /** Continuidad Cortex Agent: se envía en cada ask tras la primera respuesta */
   const conversationIdRef = useRef<string | null>(null);
 
-  // undefined → dev local. '' → mismo origen (nginx en EC2: /api → FastAPI).
-  const raw = process.env.NEXT_PUBLIC_API_URL;
-  let API_URL: string;
-  if (raw === undefined) {
-    API_URL = 'http://127.0.0.1:8000';
-  } else if (raw.trim() === '') {
-    API_URL = '';
-  } else {
-    const t = raw.trim();
-    API_URL = t.startsWith('http') ? t : `https://${t}`;
-  }
+  const API_URL = getApiBaseUrl();
 
   const askSynapse = async (query: string) => {
     setIsLoading(true);

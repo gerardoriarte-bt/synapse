@@ -2,7 +2,9 @@
 
 import React, { ReactNode, useState } from 'react';
 import Image from 'next/image';
-import { BarChart3, ChevronsLeft, ChevronsRight, LayoutDashboard } from 'lucide-react';
+import Link from 'next/link';
+import { usePathname } from 'next/navigation';
+import { BarChart3, CalendarRange, ChevronsLeft, ChevronsRight, LayoutDashboard } from 'lucide-react';
 
 interface Props {
   children: ReactNode;
@@ -12,6 +14,7 @@ interface Props {
 
 export const SynapseChatLayout: React.FC<Props> = ({ children, onViewChange, currentView = 'chat' }) => {
   const [collapsed, setCollapsed] = useState(false);
+  const pathname = usePathname();
 
   return (
     <div className="flex h-screen bg-[#141414] text-zinc-100 overflow-hidden font-sans">
@@ -54,8 +57,15 @@ export const SynapseChatLayout: React.FC<Props> = ({ children, onViewChange, cur
           <SidebarItem
             icon={<LayoutDashboard size={19} />}
             label="Analytic Chat"
-            active={currentView === 'chat'}
+            active={currentView === 'chat' && pathname === '/'}
             onClick={() => onViewChange?.('chat')}
+            collapsed={collapsed}
+          />
+          <SidebarLinkItem
+            href="/daily-dashboard"
+            icon={<CalendarRange size={19} />}
+            label="Seguimiento diario"
+            active={pathname === '/daily-dashboard'}
             collapsed={collapsed}
           />
         </nav>
@@ -113,4 +123,32 @@ const SidebarItem = ({
     <span className={`${active ? 'text-indigo-400' : 'group-hover:text-zinc-300'}`}>{icon}</span>
     {!collapsed && label}
   </button>
+);
+
+const SidebarLinkItem = ({
+  href,
+  icon,
+  label,
+  active = false,
+  collapsed = false,
+}: {
+  href: string;
+  icon: React.ReactNode;
+  label: string;
+  active?: boolean;
+  collapsed?: boolean;
+}) => (
+  <Link
+    href={href}
+    className={`w-full flex items-center ${
+      collapsed ? 'justify-center px-2' : 'gap-4 px-4'
+    } py-3 rounded-xl text-sm font-semibold transition-all duration-300 group ${
+      active
+        ? 'bg-zinc-100/10 text-white border border-zinc-800 shadow-[0_0_15px_rgba(99,102,241,0.05)]'
+        : 'text-zinc-500 hover:bg-zinc-100/5 hover:text-zinc-300'
+    }`}
+  >
+    <span className={`${active ? 'text-indigo-400' : 'group-hover:text-zinc-300'}`}>{icon}</span>
+    {!collapsed && label}
+  </Link>
 );
