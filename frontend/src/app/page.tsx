@@ -2,6 +2,7 @@
 
 import React, { useState, useRef, useEffect } from 'react';
 import Image from 'next/image';
+import Link from 'next/link';
 import { SynapseChatLayout } from '@/components/layout/SynapseChatLayout';
 import { DynamicRenderer } from '@/components/modules/DynamicRenderer';
 import { IntelligenceDashboard } from '@/components/modules/IntelligenceDashboard';
@@ -175,6 +176,7 @@ export default function Home() {
                 </div>
                 <div className="flex flex-wrap justify-center gap-3 max-w-xl">
                   <SuggestionChip text="Vista Ejecutiva" onClick={generateIntelligence} highlight />
+                  <SuggestionLink href="/daily-dashboard" text="Seguimiento diario" />
                   <SuggestionChip text="ROAS Semanal" onClick={() => { setQuery('¿Cómo ha variado el ROAS las últimas semanas?'); }} />
                   <SuggestionChip text="Anomalías de Gasto" onClick={() => { setQuery('Busca anomalías de gasto ayer'); }} />
                 </div>
@@ -263,6 +265,15 @@ const SuggestionChip = ({ text, onClick, highlight = false }: { text: string; on
   >
     {text}
   </button>
+);
+
+const SuggestionLink = ({ href, text }: { href: string; text: string }) => (
+  <Link
+    href={href}
+    className="inline-flex items-center justify-center px-5 py-3 rounded-2xl text-[11px] font-black uppercase tracking-widest transition-all active:scale-95 border border-zinc-700 bg-zinc-900/40 text-zinc-400 hover:border-indigo-500/40 hover:bg-indigo-500/10 hover:text-indigo-200"
+  >
+    {text}
+  </Link>
 );
 
 const LOADING_STEPS = [

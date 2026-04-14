@@ -81,11 +81,24 @@ export const SynapseChatLayout: React.FC<Props> = ({ children, onViewChange, cur
 
       {/* Área de Contenido Principal con fondo degradado sutil */}
       <main className="synapse-print-main flex-grow flex flex-col relative bg-[linear-gradient(to_bottom,#17283A_0%,#141414_100%)]">
-        <header className="no-print h-20 border-b border-white/10 bg-black/25 backdrop-blur-md sticky top-0 z-20 flex items-center px-10">
-          <div className="flex items-center gap-2">
-            <div className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
-            <h2 className="text-xs font-bold text-zinc-500 uppercase tracking-widest">Synapse Analyst Workspace</h2>
+        <header className="no-print h-20 border-b border-white/10 bg-black/25 backdrop-blur-md sticky top-0 z-20 flex items-center justify-between gap-4 px-6 sm:px-10">
+          <div className="flex min-w-0 items-center gap-2">
+            <div className="w-2 h-2 shrink-0 rounded-full bg-emerald-500 animate-pulse" />
+            <h2 className="truncate text-xs font-bold text-zinc-500 uppercase tracking-widest">
+              Synapse Analyst Workspace
+            </h2>
           </div>
+          {pathname === '/' && (
+            <Link
+              href="/daily-dashboard"
+              className="inline-flex shrink-0 items-center gap-2 rounded-xl border border-indigo-400/30 bg-indigo-500/10 px-3 py-2 text-[11px] font-bold uppercase tracking-widest text-indigo-200 transition hover:border-indigo-300/50 hover:bg-indigo-500/15 hover:text-white"
+              aria-label="Abrir tablero de seguimiento diario"
+            >
+              <CalendarRange size={16} className="text-indigo-300" aria-hidden />
+              <span className="hidden sm:inline">Seguimiento diario</span>
+              <span className="sm:hidden">Dashboard</span>
+            </Link>
+          )}
         </header>
 
         <div className="synapse-print-scroll flex-grow overflow-y-auto px-6 xl:px-10 py-12 scrollbar-hide">
