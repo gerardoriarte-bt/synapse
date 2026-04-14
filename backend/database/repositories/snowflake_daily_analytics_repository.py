@@ -132,6 +132,66 @@ class SnowflakeDailyAnalyticsRepository:
         data = self._all_rows(sql, params, "fetch_top_products_by_units")
         return data, date_filtered
 
+    def fetch_product_sales_period_totals(self, start: date, end: date) -> Dict[str, Any]:
+        """
+        Suma de unidades e ingresos en VENTAS_PRODUCTOS_FUENTE para el mismo rango de fechas
+        que el ranking (todas las líneas con producto no nulo), no solo el top N.
+        """
+        name_col = self._product_name_col
+        date_col = self._product_date_col
+
+        if date_col:
+            sql = f"""
+                SELECT
+                    COALESCE(SUM(UNIDADES_VENDIDAS), 0) AS UNIDADES_VENDIDAS,
+                    COALESCE(SUM(INGRESOS_USD), 0) AS REVENUE_USD,
+                    COUNT(DISTINCT {name_col}) AS PRODUCTOS_DISTINTOS
+                FROM {self._product_fq}
+                WHERE {name_col} IS NOT NULL
+                  AND {date_col} >= %s AND {date_col} <= %s
+            """
+            params: Tuple[Any, ...] = (start, end)
+        else:
+            sql = f"""
+                SELECT
+                    COALESCE(SUM(UNIDADES_VENDIDAS), 0) AS UNIDADES_VENDIDAS,
+                    COALESCE(SUM(INGRESOS_USD), 0) AS REVENUE_USD,
+                    COUNT(DISTINCT {name_col}) AS PRODUCTOS_DISTINTOS
+                FROM {self._product_fq}
+                WHERE {name_col} IS NOT NULL
+            """
+            params = ()
+
+        return self._one_row(sql, params, "fetch_product_sales_period_totals")
+
+    def fetch_active_campaigns_period_totals(self, start: date, end: date) -> Dict[str, Any]:
+        """Agregado del periodo sobre el mismo universo que campañas activas (sin límite de filas)."""
+        sql = f"""
+            SELECT
+                COALESCE(SUM(ingresos), 0) AS INGRESOS_USD_PERIODO,
+                COALESCE(SUM(gasto), 0) AS GASTO_USD_PERIODO,
+                COALESCE(SUM(ordenes), 0) AS ORDENES_PERIODO,
+                ROUND(
+                    COALESCE(SUM(ingresos), 0) / NULLIF(SUM(gasto), 0),
+                    4
+                ) AS ROAS,
+                COUNT(*) AS CAMPANAS_DISTINTAS
+            FROM (
+                SELECT
+                    COALESCE(SUM(INGRESOS_USD), 0) AS ingresos,
+                    COALESCE(SUM(COST_USD), 0) AS gasto,
+                    COALESCE(SUM(ORDENES_VENDIDAS), 0) AS ordenes
+                FROM {self._fct_fq}
+                WHERE DATE >= %s AND DATE <= %s
+                GROUP BY COALESCE(FUENTE, 'SIN_FUENTE'), COALESCE(CAMPAIGN_PRIMARIO, 'SIN_CAMPAÑA')
+                HAVING SUM(COALESCE(COST_USD, 0)) > 0
+                    OR SUM(COALESCE(CLICKS, 0)) > 0
+                    OR SUM(COALESCE(IMPRESSIONS, 0)) > 0
+                    OR SUM(COALESCE(ORDENES_VENDIDAS, 0)) > 0
+            ) t
+        """
+        return self._one_row(sql, (start, end), "fetch_active_campaigns_period_totals")
+
     def fetch_top_campaigns_by_revenue(
         self, start: date, end: date, limit: int
     ) -> List[Dict[str, Any]]:

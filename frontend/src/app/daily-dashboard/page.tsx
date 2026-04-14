@@ -13,6 +13,8 @@ type DailyOverview = {
   top_products_by_units: Row[];
   top_campaigns_by_revenue: Row[];
   active_campaigns: Row[];
+  product_sales_period_totals?: Row;
+  active_campaigns_period_totals?: Row;
   meta: {
     top_limit: number;
     active_campaigns_row_cap: number;
@@ -72,6 +74,41 @@ export default function DailyDashboardPage() {
   }, []);
 
   const summary = data?.summary;
+
+  const pt = data?.product_sales_period_totals;
+  const productsFooter =
+    data && data.top_products_by_units.length > 0 && pt && Object.keys(pt).length > 0
+      ? ({
+          PRODUCTO: 'Total periodo (todas las líneas con producto)',
+          UNIDADES_VENDIDAS: pt.UNIDADES_VENDIDAS,
+          REVENUE_USD: pt.REVENUE_USD,
+        } satisfies Row)
+      : null;
+
+  const summaryRow = data?.summary;
+  const campaignsFooter =
+    data && data.top_campaigns_by_revenue.length > 0 && summaryRow && Object.keys(summaryRow).length > 0
+      ? ({
+          CAMPAIGN_PRIMARIO: 'Total periodo (FCT, todas las filas)',
+          FUENTE: '—',
+          REVENUE_USD: summaryRow.REVENUE_USD,
+          ROAS: summaryRow.ROAS,
+        } satisfies Row)
+      : null;
+
+  const at = data?.active_campaigns_period_totals;
+  const activeFooter =
+    data && data.active_campaigns.length > 0 && at && Object.keys(at).length > 0
+      ? ({
+          FUENTE: 'Total periodo (campañas con actividad)',
+          CAMPAIGN_PRIMARIO: '—',
+          INGRESOS_USD_PERIODO: at.INGRESOS_USD_PERIODO,
+          GASTO_USD_PERIODO: at.GASTO_USD_PERIODO,
+          ORDENES_PERIODO: at.ORDENES_PERIODO,
+          ROAS: at.ROAS,
+          FECHA_ULTIMA_ACTIVIDAD: '—',
+        } satisfies Row)
+      : null;
 
   return (
     <div className="min-h-screen bg-[#141414] text-zinc-100">
@@ -147,7 +184,11 @@ export default function DailyDashboardPage() {
             </section>
 
             <section className="grid gap-8 lg:grid-cols-2">
-              <DataPanel title="Top productos vendidos (unidades)" subtitle="Por volumen en el periodo">
+              <DataPanel
+                title="Top productos vendidos (unidades)"
+                subtitle="Por volumen en el periodo"
+                footnote="Si ves unidades con revenue 0, suele deberse a regalos o promos sin cargo, canjes, notas de crédito, reembolsos neteados, o líneas donde el ingreso quedó en otra fila (bundle, split de línea, o fuente distinta). La fila inferior es la suma de todo el periodo en la tabla de ventas por producto, no solo del top 10."
+              >
                 <SimpleTable
                   columns={[
                     { key: 'PRODUCTO', label: 'Producto' },
@@ -155,9 +196,14 @@ export default function DailyDashboardPage() {
                     { key: 'REVENUE_USD', label: 'Revenue', format: formatMoney },
                   ]}
                   rows={data.top_products_by_units}
+                  footer={productsFooter}
                 />
               </DataPanel>
-              <DataPanel title="Top campañas por revenue" subtitle="Por ingresos atribuidos en el periodo">
+              <DataPanel
+                title="Top campañas por revenue"
+                subtitle="Por ingresos atribuidos en el periodo"
+                footnote="La fila inferior usa el mismo agregado del periodo que las tarjetas KPI (FCT_PERFORMANCE), no solo las campañas listadas arriba."
+              >
                 <SimpleTable
                   columns={[
                     { key: 'CAMPAIGN_PRIMARIO', label: 'Campaña' },
@@ -166,6 +212,7 @@ export default function DailyDashboardPage() {
                     { key: 'ROAS', label: 'ROAS', format: formatNum },
                   ]}
                   rows={data.top_campaigns_by_revenue}
+                  footer={campaignsFooter}
                 />
               </DataPanel>
             </section>
@@ -173,6 +220,7 @@ export default function DailyDashboardPage() {
             <DataPanel
               title="Campañas activas (fuente + nombre)"
               subtitle="Con gasto, clicks, impresiones u órdenes en el periodo; ordenadas por revenue"
+              footnote="La fila inferior suma todas las campañas que cumplen el criterio de actividad en el periodo (sin tope de filas). La tabla de arriba está limitada por configuración."
             >
               <SimpleTable
                 columns={[
@@ -185,6 +233,7 @@ export default function DailyDashboardPage() {
                   { key: 'FECHA_ULTIMA_ACTIVIDAD', label: 'Última actividad' },
                 ]}
                 rows={data.active_campaigns}
+                footer={activeFooter}
               />
             </DataPanel>
           </>
@@ -206,16 +255,19 @@ function MetricCard({ title, value }: { title: string; value: string }) {
 function DataPanel({
   title,
   subtitle,
+  footnote,
   children,
 }: {
   title: string;
   subtitle?: string;
+  footnote?: string;
   children: ReactNode;
 }) {
   return (
     <div className="rounded-2xl border border-zinc-800 bg-zinc-900/30 p-5">
       <h2 className="text-sm font-bold text-zinc-200">{title}</h2>
       {subtitle && <p className="mt-1 text-xs text-zinc-500">{subtitle}</p>}
+      {footnote && <p className="mt-2 text-[11px] leading-relaxed text-zinc-600">{footnote}</p>}
       <div className="mt-4 overflow-x-auto">{children}</div>
     </div>
   );
@@ -224,9 +276,11 @@ function DataPanel({
 function SimpleTable({
   columns,
   rows,
+  footer,
 }: {
   columns: { key: string; label: string; format?: (v: unknown) => string }[];
   rows: Row[];
+  footer?: Row | null;
 }) {
   if (!rows.length) {
     return <p className="text-sm text-zinc-500">Sin filas en este periodo.</p>;
@@ -257,6 +311,21 @@ function SimpleTable({
           </tr>
         ))}
       </tbody>
+      {footer && (
+        <tfoot>
+          <tr className="border-t border-zinc-700 bg-zinc-900/80 text-zinc-100">
+            {columns.map((c) => {
+              const raw = footer[c.key];
+              const cell = c.format ? c.format(raw) : raw === null || raw === undefined ? '—' : String(raw);
+              return (
+                <td key={c.key} className="max-w-[220px] truncate py-2.5 pr-3 align-top text-[11px] font-semibold">
+                  {cell}
+                </td>
+              );
+            })}
+          </tr>
+        </tfoot>
+      )}
     </table>
   );
 }
