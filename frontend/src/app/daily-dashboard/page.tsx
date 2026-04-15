@@ -3,10 +3,10 @@
 import Link from 'next/link';
 import { useEffect, useState, type ReactNode } from 'react';
 import { ArrowLeft, Loader2, RefreshCw } from 'lucide-react';
-import { ResponsiveContainer, Tooltip, Treemap } from 'recharts';
 import { getApiBaseUrl } from '@/lib/api-base';
 
 type Row = Record<string, unknown>;
+type Mode = 'volume' | 'performance';
 
 type DailyOverview = {
   range: { start_date: string; end_date: string };
@@ -53,69 +53,46 @@ function safeDivide(a: unknown, b: unknown): number | null {
   return toNum(a) / den;
 }
 
-type HierNode = {
-  name: string;
-  value: number;
+type HierarchyRow = {
+  FUENTE: string;
+  CAMPAIGN_PRIMARIO: string;
   VENTA_TOTAL: number;
   TRANSACCIONES: number;
   TICKET_PROMEDIO: number;
   UNIDADES_POR_TICKET: number;
   PRECIO_PROMEDIO: number;
-  children?: HierNode[];
 };
 
-function buildHierarchy(rows: Row[], metric: 'TRANSACCIONES' | 'TICKET_PROMEDIO'): HierNode[] {
-  const bySource = new Map<string, HierNode>();
-  rows.forEach((row) => {
-    const source = String(row.FUENTE ?? 'SIN_FUENTE');
-    const campaign = String(row.CAMPAIGN_PRIMARIO ?? 'SIN_CAMPAÑA');
-    const venta = toNum(row.VENTA_TOTAL);
-    const tx = toNum(row.TRANSACCIONES);
-    const ticket = toNum(row.TICKET_PROMEDIO);
-    const unitsPerTicket = toNum(row.UNIDADES_POR_TICKET);
-    const avgPrice = toNum(row.PRECIO_PROMEDIO);
-    const metricValue = Math.max(0.0001, metric === 'TRANSACCIONES' ? tx : ticket);
+type SourceNode = {
+  name: string;
+  revenue: number;
+  tx: number;
+  ticket: number;
+};
 
-    let sourceNode = bySource.get(source);
-    if (!sourceNode) {
-      sourceNode = {
-        name: source,
-        value: 0.0001,
-        VENTA_TOTAL: 0,
-        TRANSACCIONES: 0,
-        TICKET_PROMEDIO: 0,
-        UNIDADES_POR_TICKET: 0,
-        PRECIO_PROMEDIO: 0,
-        children: [],
-      };
-      bySource.set(source, sourceNode);
-    }
+function normalizeHierarchyRows(rows: Row[]): HierarchyRow[] {
+  return rows.map((row) => ({
+    FUENTE: String(row.FUENTE ?? 'SIN_FUENTE'),
+    CAMPAIGN_PRIMARIO: String(row.CAMPAIGN_PRIMARIO ?? 'SIN_CAMPAÑA'),
+    VENTA_TOTAL: toNum(row.VENTA_TOTAL),
+    TRANSACCIONES: toNum(row.TRANSACCIONES),
+    TICKET_PROMEDIO: toNum(row.TICKET_PROMEDIO),
+    UNIDADES_POR_TICKET: toNum(row.UNIDADES_POR_TICKET),
+    PRECIO_PROMEDIO: toNum(row.PRECIO_PROMEDIO),
+  }));
+}
 
-    sourceNode.children!.push({
-      name: campaign,
-      value: metricValue,
-      VENTA_TOTAL: venta,
-      TRANSACCIONES: tx,
-      TICKET_PROMEDIO: ticket,
-      UNIDADES_POR_TICKET: unitsPerTicket,
-      PRECIO_PROMEDIO: avgPrice,
-    });
-    sourceNode.VENTA_TOTAL += venta;
-    sourceNode.TRANSACCIONES += tx;
+function buildSourceNodes(rows: HierarchyRow[]): SourceNode[] {
+  const map = new Map<string, SourceNode>();
+  rows.forEach((r) => {
+    const curr = map.get(r.FUENTE) ?? { name: r.FUENTE, revenue: 0, tx: 0, ticket: 0 };
+    curr.revenue += r.VENTA_TOTAL;
+    curr.tx += r.TRANSACCIONES;
+    map.set(r.FUENTE, curr);
   });
-
-  bySource.forEach((node) => {
-    const tx = node.TRANSACCIONES;
-    node.TICKET_PROMEDIO = tx ? node.VENTA_TOTAL / tx : 0;
-    node.UNIDADES_POR_TICKET = 0;
-    node.PRECIO_PROMEDIO = 0;
-    node.value = Math.max(
-      0.0001,
-      (node.children || []).reduce((acc, c) => acc + c.value, 0),
-    );
-  });
-
-  return Array.from(bySource.values()).sort((a, b) => b.value - a.value);
+  return Array.from(map.values())
+    .map((s) => ({ ...s, ticket: s.tx ? s.revenue / s.tx : 0 }))
+    .sort((a, b) => b.tx - a.tx);
 }
 
 export default function DailyDashboardPage() {
@@ -198,9 +175,7 @@ export default function DailyDashboardPage() {
         } satisfies Row)
       : null;
 
-  const hierarchyRows = data?.source_campaign_hierarchy ?? [];
-  const hierarchyByVolume = buildHierarchy(hierarchyRows, 'TRANSACCIONES');
-  const hierarchyByTicket = buildHierarchy(hierarchyRows, 'TICKET_PROMEDIO');
+  const hierarchyRows = normalizeHierarchyRows(data?.source_campaign_hierarchy ?? []);
 
   return (
     <div className="min-h-screen bg-[#141414] text-zinc-100">
@@ -279,16 +254,16 @@ export default function DailyDashboardPage() {
 
             <section className="grid gap-8 lg:grid-cols-2">
               <DataPanel
-                title="Esquema jerárquico: volumen de transacciones"
-                subtitle="Fuente → Campaña (tamaño = transacciones)"
+                title="Nodos conectados: desglose de volumen"
+                subtitle="Fuente → Campaña (conexiones ponderadas por transacciones)"
               >
-                <HierarchyTreemap data={hierarchyByVolume} />
+                <ConnectedNodeGraph rows={hierarchyRows} mode="volume" />
               </DataPanel>
               <DataPanel
-                title="Esquema jerárquico: ticket promedio"
-                subtitle="Fuente → Campaña (tamaño = ticket promedio)"
+                title="Nodos conectados: comparativa de rendimiento"
+                subtitle="Fuente → Campaña (color por ticket promedio vs promedio de su fuente)"
               >
-                <HierarchyTreemap data={hierarchyByTicket} />
+                <ConnectedNodeGraph rows={hierarchyRows} mode="performance" />
               </DataPanel>
             </section>
 
@@ -352,64 +327,89 @@ export default function DailyDashboardPage() {
   );
 }
 
-function HierarchyTreemap({ data }: { data: HierNode[] }) {
-  if (!data.length) {
+function ConnectedNodeGraph({ rows, mode }: { rows: HierarchyRow[]; mode: Mode }) {
+  if (!rows.length) {
     return <p className="text-sm text-zinc-500">Sin datos jerárquicos para el periodo.</p>;
   }
-  return (
-    <div className="h-[320px] w-full">
-      <ResponsiveContainer width="100%" height="100%">
-        <Treemap
-          data={data}
-          dataKey="value"
-          stroke="#27272a"
-          fill="#6366f1"
-          animationDuration={300}
-          content={<HierarchyCell />}
-        >
-          <Tooltip content={<HierarchyTooltip />} />
-        </Treemap>
-      </ResponsiveContainer>
-    </div>
-  );
-}
 
-function HierarchyCell(props: {
-  depth?: number;
-  x?: number;
-  y?: number;
-  width?: number;
-  height?: number;
-  name?: string;
-}) {
-  const { depth = 0, x = 0, y = 0, width = 0, height = 0, name = '' } = props;
-  const isContainer = depth === 1;
-  const fill = isContainer ? '#312e81' : '#4f46e5';
-  const canLabel = width > 80 && height > 28;
+  const sources = buildSourceNodes(rows).slice(0, 6);
+  const sourceSet = new Set(sources.map((s) => s.name));
+  const campaigns = rows
+    .filter((r) => sourceSet.has(r.FUENTE))
+    .sort((a, b) => b.TRANSACCIONES - a.TRANSACCIONES)
+    .slice(0, 12);
+
+  const sourceYStep = 320 / Math.max(sources.length, 1);
+  const campaignYStep = 320 / Math.max(campaigns.length, 1);
+  const maxTx = Math.max(...campaigns.map((c) => c.TRANSACCIONES), 1);
 
   return (
-    <g>
-      <rect x={x} y={y} width={width} height={height} style={{ fill, stroke: '#111827', strokeWidth: 1 }} />
-      {canLabel && (
-        <text x={x + 6} y={y + 16} fill="#e5e7eb" fontSize={11}>
-          {name}
-        </text>
-      )}
-    </g>
-  );
-}
+    <div className="space-y-3">
+      <div className="h-[340px] w-full overflow-hidden rounded-xl border border-zinc-800 bg-zinc-950/40 p-2">
+        <svg viewBox="0 0 1000 340" className="h-full w-full">
+          {campaigns.map((c, i) => {
+            const sourceIndex = sources.findIndex((s) => s.name === c.FUENTE);
+            const y1 = 20 + sourceYStep * sourceIndex + sourceYStep / 2;
+            const y2 = 20 + campaignYStep * i + campaignYStep / 2;
+            const strokeWidth = mode === 'volume' ? Math.max(1.2, (c.TRANSACCIONES / maxTx) * 8) : 2.5;
+            const sourceTicket = sources[sourceIndex]?.ticket ?? 0;
+            const perfRatio = sourceTicket > 0 ? c.TICKET_PROMEDIO / sourceTicket : 1;
+            const perfColor =
+              perfRatio >= 1.1 ? '#22c55e' : perfRatio >= 0.95 ? '#a3a3a3' : '#f97316';
+            const stroke = mode === 'volume' ? '#6366f1' : perfColor;
+            return (
+              <path
+                key={`${c.FUENTE}-${c.CAMPAIGN_PRIMARIO}`}
+                d={`M 220 ${y1} C 380 ${y1}, 560 ${y2}, 760 ${y2}`}
+                fill="none"
+                stroke={stroke}
+                strokeWidth={strokeWidth}
+                opacity={0.7}
+              />
+            );
+          })}
 
-function HierarchyTooltip({ active, payload }: { active?: boolean; payload?: Array<{ payload?: HierNode }> }) {
-  if (!active || !payload?.length || !payload[0]?.payload) return null;
-  const p = payload[0].payload;
-  return (
-    <div className="rounded-lg border border-zinc-700 bg-zinc-900 px-3 py-2 text-xs text-zinc-100 shadow-lg">
-      <p className="font-semibold">{p.name}</p>
-      <p>Venta: {formatMoney(p.VENTA_TOTAL)}</p>
-      <p>Transacciones: {formatNum(p.TRANSACCIONES)}</p>
-      <p>Ticket promedio: {formatMoney(p.TICKET_PROMEDIO)}</p>
-      <p>Unidades por ticket: {formatNum(p.UNIDADES_POR_TICKET)}</p>
-      <p>Precio promedio: {formatMoney(p.PRECIO_PROMEDIO)}</p>
+          {sources.map((s, i) => {
+            const y = 20 + sourceYStep * i + sourceYStep / 2;
+            return (
+              <g key={s.name}>
+                <rect x={20} y={y - 18} width={190} height={36} rx={8} fill="#1e1b4b" stroke="#4338ca" />
+                <text x={30} y={y - 3} fill="#e5e7eb" fontSize={12} fontWeight={600}>
+                  {s.name}
+                </text>
+                <text x={30} y={y + 11} fill="#a1a1aa" fontSize={10}>
+                  Tx {formatNum(s.tx)} | Ticket {formatMoney(s.ticket)}
+                </text>
+              </g>
+            );
+          })}
+
+          {campaigns.map((c, i) => {
+            const y = 20 + campaignYStep * i + campaignYStep / 2;
+            const sourceTicket = sources.find((s) => s.name === c.FUENTE)?.ticket ?? 0;
+            const perfRatio = sourceTicket > 0 ? c.TICKET_PROMEDIO / sourceTicket : 1;
+            const perfColor =
+              perfRatio >= 1.1 ? '#14532d' : perfRatio >= 0.95 ? '#1f2937' : '#7c2d12';
+            const fill = mode === 'volume' ? '#312e81' : perfColor;
+            return (
+              <g key={`${c.FUENTE}-${c.CAMPAIGN_PRIMARIO}-node`}>
+                <rect x={770} y={y - 16} width={210} height={32} rx={8} fill={fill} stroke="#374151" />
+                <text x={780} y={y - 2} fill="#e5e7eb" fontSize={11} fontWeight={600}>
+                  {c.CAMPAIGN_PRIMARIO.slice(0, 28)}
+                </text>
+                <text x={780} y={y + 11} fill="#a1a1aa" fontSize={9}>
+                  Tx {formatNum(c.TRANSACCIONES)} | Ticket {formatMoney(c.TICKET_PROMEDIO)}
+                </text>
+              </g>
+            );
+          })}
+        </svg>
+      </div>
+      <p className="text-[11px] text-zinc-500">
+        {mode === 'volume'
+          ? 'Conexiones más gruesas = mayor volumen de transacciones.'
+          : 'Verde = ticket sobre promedio de su fuente, naranja = bajo promedio de su fuente.'}
+      </p>
     </div>
   );
 }
