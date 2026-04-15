@@ -59,6 +59,7 @@ type HierarchyRow = {
   CAMPAIGN_PRIMARIO: string;
   VENTA_TOTAL: number;
   TRANSACCIONES: number;
+  UNIDADES: number;
   TICKET_PROMEDIO: number;
   UNIDADES_POR_TICKET: number;
   PRECIO_PROMEDIO: number;
