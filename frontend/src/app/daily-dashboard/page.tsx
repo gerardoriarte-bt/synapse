@@ -78,6 +78,7 @@ function normalizeHierarchyRows(rows: Row[]): HierarchyRow[] {
     CAMPAIGN_PRIMARIO: String(row.CAMPAIGN_PRIMARIO ?? 'SIN_CAMPAÑA'),
     VENTA_TOTAL: toNum(row.VENTA_TOTAL),
     TRANSACCIONES: toNum(row.TRANSACCIONES),
+    UNIDADES: toNum(row.UNIDADES),
     TICKET_PROMEDIO: toNum(row.TICKET_PROMEDIO),
     UNIDADES_POR_TICKET: toNum(row.UNIDADES_POR_TICKET),
     PRECIO_PROMEDIO: toNum(row.PRECIO_PROMEDIO),
