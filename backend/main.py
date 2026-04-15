@@ -228,6 +228,7 @@ async def daily_dashboard_overview(
         active_campaigns = repo.fetch_active_campaigns_detail(start, end, cap)
         product_sales_period_totals = repo.fetch_product_sales_period_totals(start, end)
         active_campaigns_period_totals = repo.fetch_active_campaigns_period_totals(start, end)
+        source_campaign_hierarchy = repo.fetch_source_campaign_hierarchy(start, end)
     except DailyDashboardSnowflakeError as e:
         structured_log(
             "error",
@@ -249,6 +250,7 @@ async def daily_dashboard_overview(
             "active_campaigns": active_campaigns,
             "product_sales_period_totals": product_sales_period_totals,
             "active_campaigns_period_totals": active_campaigns_period_totals,
+            "source_campaign_hierarchy": source_campaign_hierarchy,
             "meta": {
                 "top_limit": lim,
                 "active_campaigns_row_cap": cap,

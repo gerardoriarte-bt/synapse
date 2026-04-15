@@ -192,6 +192,38 @@ class SnowflakeDailyAnalyticsRepository:
         """
         return self._one_row(sql, (start, end), "fetch_active_campaigns_period_totals")
 
+    def fetch_source_campaign_hierarchy(self, start: date, end: date) -> List[Dict[str, Any]]:
+        """
+        Dataset jerárquico Fuente -> Campaña para visualizar volumen vs ticket promedio.
+        """
+        sql = f"""
+            SELECT
+                COALESCE(FUENTE, 'SIN_FUENTE') AS FUENTE,
+                COALESCE(CAMPAIGN_PRIMARIO, 'SIN_CAMPAÑA') AS CAMPAIGN_PRIMARIO,
+                COALESCE(SUM(INGRESOS_USD), 0) AS VENTA_TOTAL,
+                COALESCE(SUM(ORDENES_VENDIDAS), 0) AS TRANSACCIONES,
+                COALESCE(SUM(UNIDADES_VENDIDAS), 0) AS UNIDADES,
+                ROUND(
+                    COALESCE(SUM(INGRESOS_USD), 0) / NULLIF(SUM(ORDENES_VENDIDAS), 0),
+                    4
+                ) AS TICKET_PROMEDIO,
+                ROUND(
+                    COALESCE(SUM(UNIDADES_VENDIDAS), 0) / NULLIF(SUM(ORDENES_VENDIDAS), 0),
+                    4
+                ) AS UNIDADES_POR_TICKET,
+                ROUND(
+                    COALESCE(SUM(INGRESOS_USD), 0) / NULLIF(SUM(UNIDADES_VENDIDAS), 0),
+                    4
+                ) AS PRECIO_PROMEDIO
+            FROM {self._fct_fq}
+            WHERE DATE >= %s AND DATE <= %s
+            GROUP BY 1, 2
+            HAVING SUM(COALESCE(ORDENES_VENDIDAS, 0)) > 0 OR SUM(COALESCE(INGRESOS_USD, 0)) > 0
+            ORDER BY VENTA_TOTAL DESC NULLS LAST
+            LIMIT 1200
+        """
+        return self._all_rows(sql, (start, end), "fetch_source_campaign_hierarchy")
+
     def fetch_top_campaigns_by_revenue(
         self, start: date, end: date, limit: int
     ) -> List[Dict[str, Any]]:

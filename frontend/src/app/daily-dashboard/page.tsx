@@ -3,6 +3,7 @@
 import Link from 'next/link';
 import { useEffect, useState, type ReactNode } from 'react';
 import { ArrowLeft, Loader2, RefreshCw } from 'lucide-react';
+import { ResponsiveContainer, Tooltip, Treemap } from 'recharts';
 import { getApiBaseUrl } from '@/lib/api-base';
 
 type Row = Record<string, unknown>;
@@ -15,6 +16,7 @@ type DailyOverview = {
   active_campaigns: Row[];
   product_sales_period_totals?: Row;
   active_campaigns_period_totals?: Row;
+  source_campaign_hierarchy?: Row[];
   meta: {
     top_limit: number;
     active_campaigns_row_cap: number;
@@ -34,6 +36,86 @@ function formatMoney(v: unknown): string {
   const n = typeof v === 'number' ? v : Number(v);
   if (!Number.isFinite(n)) return String(v);
   return n.toLocaleString('es-MX', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 });
+}
+
+function toNum(v: unknown): number {
+  if (typeof v === 'number' && Number.isFinite(v)) return v;
+  if (typeof v === 'string') {
+    const parsed = Number(v.replace(/,/g, '').trim());
+    return Number.isFinite(parsed) ? parsed : 0;
+  }
+  return 0;
+}
+
+function safeDivide(a: unknown, b: unknown): number | null {
+  const den = toNum(b);
+  if (!den) return null;
+  return toNum(a) / den;
+}
+
+type HierNode = {
+  name: string;
+  value: number;
+  VENTA_TOTAL: number;
+  TRANSACCIONES: number;
+  TICKET_PROMEDIO: number;
+  UNIDADES_POR_TICKET: number;
+  PRECIO_PROMEDIO: number;
+  children?: HierNode[];
+};
+
+function buildHierarchy(rows: Row[], metric: 'TRANSACCIONES' | 'TICKET_PROMEDIO'): HierNode[] {
+  const bySource = new Map<string, HierNode>();
+  rows.forEach((row) => {
+    const source = String(row.FUENTE ?? 'SIN_FUENTE');
+    const campaign = String(row.CAMPAIGN_PRIMARIO ?? 'SIN_CAMPAÑA');
+    const venta = toNum(row.VENTA_TOTAL);
+    const tx = toNum(row.TRANSACCIONES);
+    const ticket = toNum(row.TICKET_PROMEDIO);
+    const unitsPerTicket = toNum(row.UNIDADES_POR_TICKET);
+    const avgPrice = toNum(row.PRECIO_PROMEDIO);
+    const metricValue = Math.max(0.0001, metric === 'TRANSACCIONES' ? tx : ticket);
+
+    let sourceNode = bySource.get(source);
+    if (!sourceNode) {
+      sourceNode = {
+        name: source,
+        value: 0.0001,
+        VENTA_TOTAL: 0,
+        TRANSACCIONES: 0,
+        TICKET_PROMEDIO: 0,
+        UNIDADES_POR_TICKET: 0,
+        PRECIO_PROMEDIO: 0,
+        children: [],
+      };
+      bySource.set(source, sourceNode);
+    }
+
+    sourceNode.children!.push({
+      name: campaign,
+      value: metricValue,
+      VENTA_TOTAL: venta,
+      TRANSACCIONES: tx,
+      TICKET_PROMEDIO: ticket,
+      UNIDADES_POR_TICKET: unitsPerTicket,
+      PRECIO_PROMEDIO: avgPrice,
+    });
+    sourceNode.VENTA_TOTAL += venta;
+    sourceNode.TRANSACCIONES += tx;
+  });
+
+  bySource.forEach((node) => {
+    const tx = node.TRANSACCIONES;
+    node.TICKET_PROMEDIO = tx ? node.VENTA_TOTAL / tx : 0;
+    node.UNIDADES_POR_TICKET = 0;
+    node.PRECIO_PROMEDIO = 0;
+    node.value = Math.max(
+      0.0001,
+      (node.children || []).reduce((acc, c) => acc + c.value, 0),
+    );
+  });
+
+  return Array.from(bySource.values()).sort((a, b) => b.value - a.value);
 }
 
 export default function DailyDashboardPage() {
@@ -74,6 +156,12 @@ export default function DailyDashboardPage() {
   }, []);
 
   const summary = data?.summary;
+  const ventaTotal = summary?.REVENUE_USD;
+  const transacciones = summary?.ORDENES;
+  const unidades = summary?.UNIDADES;
+  const ticketPromedio = safeDivide(ventaTotal, transacciones);
+  const unidadesPorTicket = safeDivide(unidades, transacciones);
+  const precioPromedio = safeDivide(ventaTotal, unidades);
 
   const pt = data?.product_sales_period_totals;
   const productsFooter =
@@ -109,6 +197,10 @@ export default function DailyDashboardPage() {
           FECHA_ULTIMA_ACTIVIDAD: '—',
         } satisfies Row)
       : null;
+
+  const hierarchyRows = data?.source_campaign_hierarchy ?? [];
+  const hierarchyByVolume = buildHierarchy(hierarchyRows, 'TRANSACCIONES');
+  const hierarchyByTicket = buildHierarchy(hierarchyRows, 'TICKET_PROMEDIO');
 
   return (
     <div className="min-h-screen bg-[#141414] text-zinc-100">
@@ -172,15 +264,32 @@ export default function DailyDashboardPage() {
               )}
             </p>
 
-            <section className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-              <MetricCard title="Revenue (USD)" value={formatMoney(summary?.REVENUE_USD)} />
-              <MetricCard title="Gasto (USD)" value={formatMoney(summary?.GASTO_USD)} />
-              <MetricCard title="Órdenes" value={formatNum(summary?.ORDENES)} />
-              <MetricCard title="ROAS" value={summary?.ROAS != null ? formatNum(summary.ROAS) : '—'} />
+            <section className="grid gap-4 sm:grid-cols-2 lg:grid-cols-5">
+              <MetricCard title="Venta total (USD)" value={formatMoney(ventaTotal)} />
+              <MetricCard title="Transacciones" value={formatNum(transacciones)} />
+              <MetricCard title="Ticket promedio" value={ticketPromedio != null ? formatMoney(ticketPromedio) : '—'} />
+              <MetricCard title="Unidades por ticket" value={unidadesPorTicket != null ? formatNum(unidadesPorTicket) : '—'} />
+              <MetricCard title="Precio promedio" value={precioPromedio != null ? formatMoney(precioPromedio) : '—'} />
             </section>
-            <section className="grid gap-4 sm:grid-cols-2">
-              <MetricCard title="Unidades" value={formatNum(summary?.UNIDADES)} />
+            <section className="grid gap-4 sm:grid-cols-3">
+              <MetricCard title="Gasto (USD)" value={formatMoney(summary?.GASTO_USD)} />
+              <MetricCard title="ROAS" value={summary?.ROAS != null ? formatNum(summary.ROAS) : '—'} />
               <MetricCard title="Clicks / Impresiones" value={`${formatNum(summary?.CLICKS)} / ${formatNum(summary?.IMPRESIONES)}`} />
+            </section>
+
+            <section className="grid gap-8 lg:grid-cols-2">
+              <DataPanel
+                title="Esquema jerárquico: volumen de transacciones"
+                subtitle="Fuente → Campaña (tamaño = transacciones)"
+              >
+                <HierarchyTreemap data={hierarchyByVolume} />
+              </DataPanel>
+              <DataPanel
+                title="Esquema jerárquico: ticket promedio"
+                subtitle="Fuente → Campaña (tamaño = ticket promedio)"
+              >
+                <HierarchyTreemap data={hierarchyByTicket} />
+              </DataPanel>
             </section>
 
             <section className="grid gap-8 lg:grid-cols-2">
@@ -239,6 +348,68 @@ export default function DailyDashboardPage() {
           </>
         )}
       </main>
+    </div>
+  );
+}
+
+function HierarchyTreemap({ data }: { data: HierNode[] }) {
+  if (!data.length) {
+    return <p className="text-sm text-zinc-500">Sin datos jerárquicos para el periodo.</p>;
+  }
+  return (
+    <div className="h-[320px] w-full">
+      <ResponsiveContainer width="100%" height="100%">
+        <Treemap
+          data={data}
+          dataKey="value"
+          stroke="#27272a"
+          fill="#6366f1"
+          animationDuration={300}
+          content={<HierarchyCell />}
+        >
+          <Tooltip content={<HierarchyTooltip />} />
+        </Treemap>
+      </ResponsiveContainer>
+    </div>
+  );
+}
+
+function HierarchyCell(props: {
+  depth?: number;
+  x?: number;
+  y?: number;
+  width?: number;
+  height?: number;
+  name?: string;
+}) {
+  const { depth = 0, x = 0, y = 0, width = 0, height = 0, name = '' } = props;
+  const isContainer = depth === 1;
+  const fill = isContainer ? '#312e81' : '#4f46e5';
+  const canLabel = width > 80 && height > 28;
+
+  return (
+    <g>
+      <rect x={x} y={y} width={width} height={height} style={{ fill, stroke: '#111827', strokeWidth: 1 }} />
+      {canLabel && (
+        <text x={x + 6} y={y + 16} fill="#e5e7eb" fontSize={11}>
+          {name}
+        </text>
+      )}
+    </g>
+  );
+}
+
+function HierarchyTooltip({ active, payload }: { active?: boolean; payload?: Array<{ payload?: HierNode }> }) {
+  if (!active || !payload?.length || !payload[0]?.payload) return null;
+  const p = payload[0].payload;
+  return (
+    <div className="rounded-lg border border-zinc-700 bg-zinc-900 px-3 py-2 text-xs text-zinc-100 shadow-lg">
+      <p className="font-semibold">{p.name}</p>
+      <p>Venta: {formatMoney(p.VENTA_TOTAL)}</p>
+      <p>Transacciones: {formatNum(p.TRANSACCIONES)}</p>
+      <p>Ticket promedio: {formatMoney(p.TICKET_PROMEDIO)}</p>
+      <p>Unidades por ticket: {formatNum(p.UNIDADES_POR_TICKET)}</p>
+      <p>Precio promedio: {formatMoney(p.PRECIO_PROMEDIO)}</p>
     </div>
   );
 }
