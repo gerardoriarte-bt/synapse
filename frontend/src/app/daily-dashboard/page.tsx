@@ -102,6 +102,8 @@ export default function DailyDashboardPage() {
   const [loading, setLoading] = useState(true);
   const [endDate, setEndDate] = useState(() => new Date().toISOString().slice(0, 10));
   const [tab, setTab] = useState<DashboardTab>('overview');
+  const [selectedSource, setSelectedSource] = useState<string | null>(null);
+  const [selectedCampaign, setSelectedCampaign] = useState<string | null>(null);
 
   const load = async () => {
     setLoading(true);
@@ -217,7 +219,11 @@ export default function DailyDashboardPage() {
         </div>
       </header>
 
-      <main className="mx-auto max-w-7xl space-y-10 px-6 py-10">
+      <main
+        className={`mx-auto space-y-10 px-6 py-10 ${
+          tab === 'sales_nodes' ? 'max-w-[120rem]' : 'max-w-7xl'
+        }`}
+      >
         {error && (
           <div className="rounded-2xl border border-red-900/40 bg-red-950/20 p-4 text-sm text-red-200">{error}</div>
         )}
@@ -239,9 +245,24 @@ export default function DailyDashboardPage() {
               />
               <TabButton
                 active={tab === 'sales_nodes'}
-                onClick={() => setTab('sales_nodes')}
+                onClick={() => {
+                  setTab('sales_nodes');
+                  setSelectedCampaign(null);
+                }}
                 label="Nodos de ventas"
               />
+              {tab === 'sales_nodes' && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSelectedSource(null);
+                    setSelectedCampaign(null);
+                  }}
+                  className="rounded-xl border border-zinc-700 bg-zinc-900/30 px-3 py-2 text-xs font-semibold text-zinc-400 transition hover:border-zinc-500 hover:text-zinc-200"
+                >
+                  Limpiar selección
+                </button>
+              )}
             </section>
 
             <p className="text-xs text-zinc-500">
@@ -344,7 +365,18 @@ export default function DailyDashboardPage() {
                 subtitle="Venta total → Medio/Fuente → Campaña"
                 footnote="Conexiones y tamaño ponderados por venta total en el periodo seleccionado."
               >
-                <SalesBreakdownNodeGraph rows={hierarchyRows} />
+                <SalesBreakdownNodeGraph
+                  rows={hierarchyRows}
+                  selectedSource={selectedSource}
+                  selectedCampaign={selectedCampaign}
+                  onSelectSource={(source) => {
+                    setSelectedSource((prev) => (prev === source ? null : source));
+                    setSelectedCampaign(null);
+                  }}
+                  onSelectCampaign={(campaign) => {
+                    setSelectedCampaign((prev) => (prev === campaign ? null : campaign));
+                  }}
+                />
               </DataPanel>
             )}
           </>
@@ -465,37 +497,57 @@ function ConnectedNodeGraph({ rows, mode }: { rows: HierarchyRow[]; mode: Mode }
   );
 }
 
-function SalesBreakdownNodeGraph({ rows }: { rows: HierarchyRow[] }) {
+function SalesBreakdownNodeGraph({
+  rows,
+  selectedSource,
+  selectedCampaign,
+  onSelectSource,
+  onSelectCampaign,
+}: {
+  rows: HierarchyRow[];
+  selectedSource: string | null;
+  selectedCampaign: string | null;
+  onSelectSource: (source: string) => void;
+  onSelectCampaign: (campaign: string) => void;
+}) {
   if (!rows.length) {
     return <p className="text-sm text-zinc-500">Sin datos jerárquicos para el periodo.</p>;
   }
+
+  const scopedRows = selectedSource
+    ? rows.filter((r) => r.FUENTE === selectedSource)
+    : rows;
 
   const sources = buildSourceNodes(rows)
     .map((s) => ({ ...s, value: s.revenue }))
     .sort((a, b) => b.value - a.value)
     .slice(0, 8);
-  const sourceSet = new Set(sources.map((s) => s.name));
-  const campaigns = rows
+  const sourceSet = new Set(
+    (selectedSource ? sources.filter((s) => s.name === selectedSource) : sources).map((s) => s.name),
+  );
+  const campaigns = scopedRows
     .filter((r) => sourceSet.has(r.FUENTE))
+    .filter((r) => (selectedCampaign ? r.CAMPAIGN_PRIMARIO === selectedCampaign : true))
     .sort((a, b) => b.VENTA_TOTAL - a.VENTA_TOTAL)
-    .slice(0, 18);
+    .slice(0, selectedSource ? 28 : 18);
 
   const totalSales = campaigns.reduce((acc, c) => acc + c.VENTA_TOTAL, 0);
-  const sourceYStep = 360 / Math.max(sources.length, 1);
-  const campaignYStep = 360 / Math.max(campaigns.length, 1);
+  const visibleSources = selectedSource ? sources.filter((s) => s.name === selectedSource) : sources;
+  const sourceYStep = 500 / Math.max(visibleSources.length, 1);
+  const campaignYStep = 500 / Math.max(campaigns.length, 1);
   const maxSourceSales = Math.max(...sources.map((s) => s.value), 1);
   const maxCampaignSales = Math.max(...campaigns.map((c) => c.VENTA_TOTAL), 1);
 
   return (
-    <div className="h-[390px] w-full overflow-hidden rounded-xl border border-zinc-800 bg-zinc-950/40 p-2">
-      <svg viewBox="0 0 1100 390" className="h-full w-full">
-        {sources.map((s, i) => {
-          const y = 15 + sourceYStep * i + sourceYStep / 2;
+    <div className="h-[620px] w-full overflow-hidden rounded-xl border border-zinc-800 bg-zinc-950/40 p-2">
+      <svg viewBox="0 0 1400 620" className="h-full w-full">
+        {visibleSources.map((s, i) => {
+          const y = 60 + sourceYStep * i + sourceYStep / 2;
           const w = 2 + (s.value / maxSourceSales) * 8;
           return (
             <path
               key={`total-${s.name}`}
-              d={`M 210 195 C 280 195, 300 ${y}, 360 ${y}`}
+              d={`M 250 310 C 340 310, 380 ${y}, 460 ${y}`}
               fill="none"
               stroke="#7c3aed"
               strokeWidth={w}
@@ -505,42 +557,56 @@ function SalesBreakdownNodeGraph({ rows }: { rows: HierarchyRow[] }) {
         })}
 
         {campaigns.map((c, i) => {
-          const sourceIndex = sources.findIndex((s) => s.name === c.FUENTE);
+          const sourceIndex = visibleSources.findIndex((s) => s.name === c.FUENTE);
           if (sourceIndex < 0) return null;
-          const y1 = 15 + sourceYStep * sourceIndex + sourceYStep / 2;
-          const y2 = 15 + campaignYStep * i + campaignYStep / 2;
+          const y1 = 60 + sourceYStep * sourceIndex + sourceYStep / 2;
+          const y2 = 60 + campaignYStep * i + campaignYStep / 2;
           const w = 1 + (c.VENTA_TOTAL / maxCampaignSales) * 6;
+          const active = !selectedCampaign || selectedCampaign === c.CAMPAIGN_PRIMARIO;
           return (
             <path
               key={`${c.FUENTE}-${c.CAMPAIGN_PRIMARIO}-sales-link`}
-              d={`M 550 ${y1} C 640 ${y1}, 700 ${y2}, 780 ${y2}`}
+              d={`M 680 ${y1} C 820 ${y1}, 900 ${y2}, 1000 ${y2}`}
               fill="none"
-              stroke="#4f46e5"
+              stroke={active ? '#4f46e5' : '#374151'}
               strokeWidth={w}
-              opacity={0.7}
+              opacity={active ? 0.75 : 0.35}
             />
           );
         })}
 
         <g>
-          <rect x={20} y={165} width={180} height={60} rx={12} fill="#1e1b4b" stroke="#4338ca" />
-          <text x={32} y={188} fill="#e5e7eb" fontSize={13} fontWeight={700}>
+          <rect x={20} y={280} width={220} height={72} rx={12} fill="#1e1b4b" stroke="#4338ca" />
+          <text x={34} y={307} fill="#e5e7eb" fontSize={14} fontWeight={700}>
             Venta total
           </text>
-          <text x={32} y={208} fill="#c4b5fd" fontSize={12}>
+          <text x={34} y={330} fill="#c4b5fd" fontSize={13}>
             {formatMoney(totalSales)}
           </text>
         </g>
 
-        {sources.map((s, i) => {
-          const y = 15 + sourceYStep * i + sourceYStep / 2;
+        {visibleSources.map((s, i) => {
+          const y = 60 + sourceYStep * i + sourceYStep / 2;
+          const active = !selectedSource || selectedSource === s.name;
           return (
-            <g key={`source-${s.name}`}>
-              <rect x={360} y={y - 18} width={190} height={36} rx={8} fill="#312e81" stroke="#4f46e5" />
-              <text x={370} y={y - 3} fill="#e5e7eb" fontSize={11} fontWeight={600}>
+            <g
+              key={`source-${s.name}`}
+              onClick={() => onSelectSource(s.name)}
+              style={{ cursor: 'pointer' }}
+            >
+              <rect
+                x={460}
+                y={y - 20}
+                width={220}
+                height={40}
+                rx={10}
+                fill={active ? '#312e81' : '#1f2937'}
+                stroke={active ? '#6366f1' : '#374151'}
+              />
+              <text x={474} y={y - 4} fill="#e5e7eb" fontSize={12} fontWeight={600}>
                 {s.name}
               </text>
-              <text x={370} y={y + 11} fill="#c4b5fd" fontSize={10}>
+              <text x={474} y={y + 12} fill="#c4b5fd" fontSize={10}>
                 {formatMoney(s.value)}
               </text>
             </g>
@@ -548,14 +614,27 @@ function SalesBreakdownNodeGraph({ rows }: { rows: HierarchyRow[] }) {
         })}
 
         {campaigns.map((c, i) => {
-          const y = 15 + campaignYStep * i + campaignYStep / 2;
+          const y = 60 + campaignYStep * i + campaignYStep / 2;
+          const active = !selectedCampaign || selectedCampaign === c.CAMPAIGN_PRIMARIO;
           return (
-            <g key={`campaign-${c.FUENTE}-${c.CAMPAIGN_PRIMARIO}`}>
-              <rect x={780} y={y - 14} width={300} height={28} rx={8} fill="#1f2937" stroke="#374151" />
-              <text x={790} y={y - 1} fill="#e5e7eb" fontSize={10} fontWeight={600}>
+            <g
+              key={`campaign-${c.FUENTE}-${c.CAMPAIGN_PRIMARIO}`}
+              onClick={() => onSelectCampaign(c.CAMPAIGN_PRIMARIO)}
+              style={{ cursor: 'pointer' }}
+            >
+              <rect
+                x={1000}
+                y={y - 15}
+                width={360}
+                height={30}
+                rx={8}
+                fill={active ? '#1e3a8a' : '#1f2937'}
+                stroke={active ? '#60a5fa' : '#374151'}
+              />
+              <text x={1012} y={y - 1} fill="#e5e7eb" fontSize={10} fontWeight={600}>
                 {c.CAMPAIGN_PRIMARIO.slice(0, 38)}
               </text>
-              <text x={1010} y={y - 1} fill="#93c5fd" fontSize={10} textAnchor="end">
+              <text x={1348} y={y - 1} fill="#93c5fd" fontSize={10} textAnchor="end">
                 {formatMoney(c.VENTA_TOTAL)}
               </text>
             </g>
