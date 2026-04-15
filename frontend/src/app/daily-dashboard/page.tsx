@@ -7,6 +7,7 @@ import { getApiBaseUrl } from '@/lib/api-base';
 
 type Row = Record<string, unknown>;
 type Mode = 'volume' | 'performance';
+type DashboardTab = 'overview' | 'sales_nodes';
 
 type DailyOverview = {
   range: { start_date: string; end_date: string };
@@ -100,6 +101,7 @@ export default function DailyDashboardPage() {
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [endDate, setEndDate] = useState(() => new Date().toISOString().slice(0, 10));
+  const [tab, setTab] = useState<DashboardTab>('overview');
 
   const load = async () => {
     setLoading(true);
@@ -229,6 +231,19 @@ export default function DailyDashboardPage() {
 
         {data && (
           <>
+            <section className="flex flex-wrap gap-2">
+              <TabButton
+                active={tab === 'overview'}
+                onClick={() => setTab('overview')}
+                label="Vista general"
+              />
+              <TabButton
+                active={tab === 'sales_nodes'}
+                onClick={() => setTab('sales_nodes')}
+                label="Nodos de ventas"
+              />
+            </section>
+
             <p className="text-xs text-zinc-500">
               Periodo: <span className="text-zinc-300">{data.range.start_date}</span> —{' '}
               <span className="text-zinc-300">{data.range.end_date}</span>
@@ -239,91 +254,127 @@ export default function DailyDashboardPage() {
               )}
             </p>
 
-            <section className="grid gap-4 sm:grid-cols-2 lg:grid-cols-5">
-              <MetricCard title="Venta total (USD)" value={formatMoney(ventaTotal)} />
-              <MetricCard title="Transacciones" value={formatNum(transacciones)} />
-              <MetricCard title="Ticket promedio" value={ticketPromedio != null ? formatMoney(ticketPromedio) : '—'} />
-              <MetricCard title="Unidades por ticket" value={unidadesPorTicket != null ? formatNum(unidadesPorTicket) : '—'} />
-              <MetricCard title="Precio promedio" value={precioPromedio != null ? formatMoney(precioPromedio) : '—'} />
-            </section>
-            <section className="grid gap-4 sm:grid-cols-3">
-              <MetricCard title="Gasto (USD)" value={formatMoney(summary?.GASTO_USD)} />
-              <MetricCard title="ROAS" value={summary?.ROAS != null ? formatNum(summary.ROAS) : '—'} />
-              <MetricCard title="Clicks / Impresiones" value={`${formatNum(summary?.CLICKS)} / ${formatNum(summary?.IMPRESIONES)}`} />
-            </section>
+            {tab === 'overview' ? (
+              <>
+                <section className="grid gap-4 sm:grid-cols-2 lg:grid-cols-5">
+                  <MetricCard title="Venta total (USD)" value={formatMoney(ventaTotal)} />
+                  <MetricCard title="Transacciones" value={formatNum(transacciones)} />
+                  <MetricCard title="Ticket promedio" value={ticketPromedio != null ? formatMoney(ticketPromedio) : '—'} />
+                  <MetricCard title="Unidades por ticket" value={unidadesPorTicket != null ? formatNum(unidadesPorTicket) : '—'} />
+                  <MetricCard title="Precio promedio" value={precioPromedio != null ? formatMoney(precioPromedio) : '—'} />
+                </section>
+                <section className="grid gap-4 sm:grid-cols-3">
+                  <MetricCard title="Gasto (USD)" value={formatMoney(summary?.GASTO_USD)} />
+                  <MetricCard title="ROAS" value={summary?.ROAS != null ? formatNum(summary.ROAS) : '—'} />
+                  <MetricCard title="Clicks / Impresiones" value={`${formatNum(summary?.CLICKS)} / ${formatNum(summary?.IMPRESIONES)}`} />
+                </section>
 
-            <section className="grid gap-8 lg:grid-cols-2">
-              <DataPanel
-                title="Nodos conectados: desglose de volumen"
-                subtitle="Fuente → Campaña (conexiones ponderadas por transacciones)"
-              >
-                <ConnectedNodeGraph rows={hierarchyRows} mode="volume" />
-              </DataPanel>
-              <DataPanel
-                title="Nodos conectados: comparativa de rendimiento"
-                subtitle="Fuente → Campaña (color por ticket promedio vs promedio de su fuente)"
-              >
-                <ConnectedNodeGraph rows={hierarchyRows} mode="performance" />
-              </DataPanel>
-            </section>
+                <section className="grid gap-8 lg:grid-cols-2">
+                  <DataPanel
+                    title="Nodos conectados: desglose de volumen"
+                    subtitle="Fuente → Campaña (conexiones ponderadas por transacciones)"
+                  >
+                    <ConnectedNodeGraph rows={hierarchyRows} mode="volume" />
+                  </DataPanel>
+                  <DataPanel
+                    title="Nodos conectados: comparativa de rendimiento"
+                    subtitle="Fuente → Campaña (color por ticket promedio vs promedio de su fuente)"
+                  >
+                    <ConnectedNodeGraph rows={hierarchyRows} mode="performance" />
+                  </DataPanel>
+                </section>
 
-            <section className="grid gap-8 lg:grid-cols-2">
-              <DataPanel
-                title="Top productos vendidos (unidades)"
-                subtitle="Por volumen en el periodo"
-                footnote="Si ves unidades con revenue 0, suele deberse a regalos o promos sin cargo, canjes, notas de crédito, reembolsos neteados, o líneas donde el ingreso quedó en otra fila (bundle, split de línea, o fuente distinta). La fila inferior es la suma de todo el periodo en la tabla de ventas por producto, no solo del top 10."
-              >
-                <SimpleTable
-                  columns={[
-                    { key: 'PRODUCTO', label: 'Producto' },
-                    { key: 'UNIDADES_VENDIDAS', label: 'Unidades', format: formatNum },
-                    { key: 'REVENUE_USD', label: 'Revenue', format: formatMoney },
-                  ]}
-                  rows={data.top_products_by_units}
-                  footer={productsFooter}
-                />
-              </DataPanel>
-              <DataPanel
-                title="Top campañas por revenue"
-                subtitle="Por ingresos atribuidos en el periodo"
-                footnote="La fila inferior usa el mismo agregado del periodo que las tarjetas KPI (FCT_PERFORMANCE), no solo las campañas listadas arriba."
-              >
-                <SimpleTable
-                  columns={[
-                    { key: 'CAMPAIGN_PRIMARIO', label: 'Campaña' },
-                    { key: 'FUENTE', label: 'Fuente' },
-                    { key: 'REVENUE_USD', label: 'Revenue', format: formatMoney },
-                    { key: 'ROAS', label: 'ROAS', format: formatNum },
-                  ]}
-                  rows={data.top_campaigns_by_revenue}
-                  footer={campaignsFooter}
-                />
-              </DataPanel>
-            </section>
+                <section className="grid gap-8 lg:grid-cols-2">
+                  <DataPanel
+                    title="Top productos vendidos (unidades)"
+                    subtitle="Por volumen en el periodo"
+                    footnote="Si ves unidades con revenue 0, suele deberse a regalos o promos sin cargo, canjes, notas de crédito, reembolsos neteados, o líneas donde el ingreso quedó en otra fila (bundle, split de línea, o fuente distinta). La fila inferior es la suma de todo el periodo en la tabla de ventas por producto, no solo del top 10."
+                  >
+                    <SimpleTable
+                      columns={[
+                        { key: 'PRODUCTO', label: 'Producto' },
+                        { key: 'UNIDADES_VENDIDAS', label: 'Unidades', format: formatNum },
+                        { key: 'REVENUE_USD', label: 'Revenue', format: formatMoney },
+                      ]}
+                      rows={data.top_products_by_units}
+                      footer={productsFooter}
+                    />
+                  </DataPanel>
+                  <DataPanel
+                    title="Top campañas por revenue"
+                    subtitle="Por ingresos atribuidos en el periodo"
+                    footnote="La fila inferior usa el mismo agregado del periodo que las tarjetas KPI (FCT_PERFORMANCE), no solo las campañas listadas arriba."
+                  >
+                    <SimpleTable
+                      columns={[
+                        { key: 'CAMPAIGN_PRIMARIO', label: 'Campaña' },
+                        { key: 'FUENTE', label: 'Fuente' },
+                        { key: 'REVENUE_USD', label: 'Revenue', format: formatMoney },
+                        { key: 'ROAS', label: 'ROAS', format: formatNum },
+                      ]}
+                      rows={data.top_campaigns_by_revenue}
+                      footer={campaignsFooter}
+                    />
+                  </DataPanel>
+                </section>
 
-            <DataPanel
-              title="Campañas activas (fuente + nombre)"
-              subtitle="Con gasto, clicks, impresiones u órdenes en el periodo; ordenadas por revenue"
-              footnote="La fila inferior suma todas las campañas que cumplen el criterio de actividad en el periodo (sin tope de filas). La tabla de arriba está limitada por configuración."
-            >
-              <SimpleTable
-                columns={[
-                  { key: 'FUENTE', label: 'Fuente' },
-                  { key: 'CAMPAIGN_PRIMARIO', label: 'Campaña' },
-                  { key: 'INGRESOS_USD_PERIODO', label: 'Revenue', format: formatMoney },
-                  { key: 'GASTO_USD_PERIODO', label: 'Gasto', format: formatMoney },
-                  { key: 'ORDENES_PERIODO', label: 'Órdenes', format: formatNum },
-                  { key: 'ROAS', label: 'ROAS', format: formatNum },
-                  { key: 'FECHA_ULTIMA_ACTIVIDAD', label: 'Última actividad' },
-                ]}
-                rows={data.active_campaigns}
-                footer={activeFooter}
-              />
-            </DataPanel>
+                <DataPanel
+                  title="Campañas activas (fuente + nombre)"
+                  subtitle="Con gasto, clicks, impresiones u órdenes en el periodo; ordenadas por revenue"
+                  footnote="La fila inferior suma todas las campañas que cumplen el criterio de actividad en el periodo (sin tope de filas). La tabla de arriba está limitada por configuración."
+                >
+                  <SimpleTable
+                    columns={[
+                      { key: 'FUENTE', label: 'Fuente' },
+                      { key: 'CAMPAIGN_PRIMARIO', label: 'Campaña' },
+                      { key: 'INGRESOS_USD_PERIODO', label: 'Revenue', format: formatMoney },
+                      { key: 'GASTO_USD_PERIODO', label: 'Gasto', format: formatMoney },
+                      { key: 'ORDENES_PERIODO', label: 'Órdenes', format: formatNum },
+                      { key: 'ROAS', label: 'ROAS', format: formatNum },
+                      { key: 'FECHA_ULTIMA_ACTIVIDAD', label: 'Última actividad' },
+                    ]}
+                    rows={data.active_campaigns}
+                    footer={activeFooter}
+                  />
+                </DataPanel>
+              </>
+            ) : (
+              <DataPanel
+                title="Nodos de ventas totales"
+                subtitle="Venta total → Medio/Fuente → Campaña"
+                footnote="Conexiones y tamaño ponderados por venta total en el periodo seleccionado."
+              >
+                <SalesBreakdownNodeGraph rows={hierarchyRows} />
+              </DataPanel>
+            )}
           </>
         )}
       </main>
     </div>
+  );
+}
+
+function TabButton({
+  active,
+  onClick,
+  label,
+}: {
+  active: boolean;
+  onClick: () => void;
+  label: string;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={`rounded-xl border px-3 py-2 text-xs font-semibold transition ${
+        active
+          ? 'border-indigo-400/50 bg-indigo-500/20 text-indigo-100'
+          : 'border-zinc-700 bg-zinc-900/30 text-zinc-400 hover:border-zinc-500 hover:text-zinc-200'
+      }`}
+    >
+      {label}
+    </button>
   );
 }
 
@@ -410,6 +461,107 @@ function ConnectedNodeGraph({ rows, mode }: { rows: HierarchyRow[]; mode: Mode }
           ? 'Conexiones más gruesas = mayor volumen de transacciones.'
           : 'Verde = ticket sobre promedio de su fuente, naranja = bajo promedio de su fuente.'}
       </p>
+    </div>
+  );
+}
+
+function SalesBreakdownNodeGraph({ rows }: { rows: HierarchyRow[] }) {
+  if (!rows.length) {
+    return <p className="text-sm text-zinc-500">Sin datos jerárquicos para el periodo.</p>;
+  }
+
+  const sources = buildSourceNodes(rows)
+    .map((s) => ({ ...s, value: s.revenue }))
+    .sort((a, b) => b.value - a.value)
+    .slice(0, 8);
+  const sourceSet = new Set(sources.map((s) => s.name));
+  const campaigns = rows
+    .filter((r) => sourceSet.has(r.FUENTE))
+    .sort((a, b) => b.VENTA_TOTAL - a.VENTA_TOTAL)
+    .slice(0, 18);
+
+  const totalSales = campaigns.reduce((acc, c) => acc + c.VENTA_TOTAL, 0);
+  const sourceYStep = 360 / Math.max(sources.length, 1);
+  const campaignYStep = 360 / Math.max(campaigns.length, 1);
+  const maxSourceSales = Math.max(...sources.map((s) => s.value), 1);
+  const maxCampaignSales = Math.max(...campaigns.map((c) => c.VENTA_TOTAL), 1);
+
+  return (
+    <div className="h-[390px] w-full overflow-hidden rounded-xl border border-zinc-800 bg-zinc-950/40 p-2">
+      <svg viewBox="0 0 1100 390" className="h-full w-full">
+        {sources.map((s, i) => {
+          const y = 15 + sourceYStep * i + sourceYStep / 2;
+          const w = 2 + (s.value / maxSourceSales) * 8;
+          return (
+            <path
+              key={`total-${s.name}`}
+              d={`M 210 195 C 280 195, 300 ${y}, 360 ${y}`}
+              fill="none"
+              stroke="#7c3aed"
+              strokeWidth={w}
+              opacity={0.8}
+            />
+          );
+        })}
+
+        {campaigns.map((c, i) => {
+          const sourceIndex = sources.findIndex((s) => s.name === c.FUENTE);
+          if (sourceIndex < 0) return null;
+          const y1 = 15 + sourceYStep * sourceIndex + sourceYStep / 2;
+          const y2 = 15 + campaignYStep * i + campaignYStep / 2;
+          const w = 1 + (c.VENTA_TOTAL / maxCampaignSales) * 6;
+          return (
+            <path
+              key={`${c.FUENTE}-${c.CAMPAIGN_PRIMARIO}-sales-link`}
+              d={`M 550 ${y1} C 640 ${y1}, 700 ${y2}, 780 ${y2}`}
+              fill="none"
+              stroke="#4f46e5"
+              strokeWidth={w}
+              opacity={0.7}
+            />
+          );
+        })}
+
+        <g>
+          <rect x={20} y={165} width={180} height={60} rx={12} fill="#1e1b4b" stroke="#4338ca" />
+          <text x={32} y={188} fill="#e5e7eb" fontSize={13} fontWeight={700}>
+            Venta total
+          </text>
+          <text x={32} y={208} fill="#c4b5fd" fontSize={12}>
+            {formatMoney(totalSales)}
+          </text>
+        </g>
+
+        {sources.map((s, i) => {
+          const y = 15 + sourceYStep * i + sourceYStep / 2;
+          return (
+            <g key={`source-${s.name}`}>
+              <rect x={360} y={y - 18} width={190} height={36} rx={8} fill="#312e81" stroke="#4f46e5" />
+              <text x={370} y={y - 3} fill="#e5e7eb" fontSize={11} fontWeight={600}>
+                {s.name}
+              </text>
+              <text x={370} y={y + 11} fill="#c4b5fd" fontSize={10}>
+                {formatMoney(s.value)}
+              </text>
+            </g>
+          );
+        })}
+
+        {campaigns.map((c, i) => {
+          const y = 15 + campaignYStep * i + campaignYStep / 2;
+          return (
+            <g key={`campaign-${c.FUENTE}-${c.CAMPAIGN_PRIMARIO}`}>
+              <rect x={780} y={y - 14} width={300} height={28} rx={8} fill="#1f2937" stroke="#374151" />
+              <text x={790} y={y - 1} fill="#e5e7eb" fontSize={10} fontWeight={600}>
+                {c.CAMPAIGN_PRIMARIO.slice(0, 38)}
+              </text>
+              <text x={1010} y={y - 1} fill="#93c5fd" fontSize={10} textAnchor="end">
+                {formatMoney(c.VENTA_TOTAL)}
+              </text>
+            </g>
+          );
+        })}
+      </svg>
     </div>
   );
 }
