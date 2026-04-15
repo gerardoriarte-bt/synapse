@@ -98,6 +98,7 @@ function buildSourceNodes(rows: HierarchyRow[]): SourceNode[] {
 
 export default function DailyDashboardPage() {
   const [data, setData] = useState<DailyOverview | null>(null);
+  const [prevData, setPrevData] = useState<DailyOverview | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [endDate, setEndDate] = useState(() => new Date().toISOString().slice(0, 10));
@@ -113,18 +114,28 @@ export default function DailyDashboardPage() {
       const startObj = new Date(end + 'T12:00:00');
       startObj.setDate(startObj.getDate() - 29);
       const start = startObj.toISOString().slice(0, 10);
+      const prevEndObj = new Date(start + 'T12:00:00');
+      prevEndObj.setDate(prevEndObj.getDate() - 1);
+      const prevEnd = prevEndObj.toISOString().slice(0, 10);
+      const prevStartObj = new Date(prevEnd + 'T12:00:00');
+      prevStartObj.setDate(prevStartObj.getDate() - 29);
+      const prevStart = prevStartObj.toISOString().slice(0, 10);
       const base = getApiBaseUrl();
       const url = `${base}/api/dashboard/daily-overview?start_date=${encodeURIComponent(start)}&end_date=${encodeURIComponent(end)}`;
-      const res = await fetch(url);
-      if (!res.ok) {
-        const text = await res.text();
-        throw new Error(text || res.statusText);
+      const prevUrl = `${base}/api/dashboard/daily-overview?start_date=${encodeURIComponent(prevStart)}&end_date=${encodeURIComponent(prevEnd)}`;
+      const [res, prevRes] = await Promise.all([fetch(url), fetch(prevUrl)]);
+      if (!res.ok || !prevRes.ok) {
+        const text = !res.ok ? await res.text() : await prevRes.text();
+        throw new Error(text || (!res.ok ? res.statusText : prevRes.statusText));
       }
       const json = (await res.json()) as DailyOverview;
+      const prevJson = (await prevRes.json()) as DailyOverview;
       setData(json);
+      setPrevData(prevJson);
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Error al cargar el tablero');
       setData(null);
+      setPrevData(null);
     } finally {
       setLoading(false);
     }
@@ -180,6 +191,15 @@ export default function DailyDashboardPage() {
       : null;
 
   const hierarchyRows = normalizeHierarchyRows(data?.source_campaign_hierarchy ?? []);
+  const prevHierarchyRows = normalizeHierarchyRows(prevData?.source_campaign_hierarchy ?? []);
+  const filteredRows = hierarchyRows.filter((r) =>
+    (selectedSource ? r.FUENTE === selectedSource : true) &&
+    (selectedCampaign ? r.CAMPAIGN_PRIMARIO === selectedCampaign : true),
+  );
+  const filteredPrevRows = prevHierarchyRows.filter((r) =>
+    (selectedSource ? r.FUENTE === selectedSource : true) &&
+    (selectedCampaign ? r.CAMPAIGN_PRIMARIO === selectedCampaign : true),
+  );
 
   return (
     <div className="min-h-screen bg-[#141414] text-zinc-100">
@@ -365,6 +385,38 @@ export default function DailyDashboardPage() {
                 subtitle="Venta total → Medio/Fuente → Campaña"
                 footnote="Conexiones y tamaño ponderados por venta total en el periodo seleccionado."
               >
+                <section className="mb-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
+                  <ComparisonMetricCard
+                    title="Venta total"
+                    current={sumMetric(filteredRows, 'VENTA_TOTAL')}
+                    previous={sumMetric(filteredPrevRows, 'VENTA_TOTAL')}
+                    format={formatMoney}
+                  />
+                  <ComparisonMetricCard
+                    title="Transacciones"
+                    current={sumMetric(filteredRows, 'TRANSACCIONES')}
+                    previous={sumMetric(filteredPrevRows, 'TRANSACCIONES')}
+                    format={formatNum}
+                  />
+                  <ComparisonMetricCard
+                    title="Ticket promedio"
+                    current={derivedMetric(filteredRows, 'ticket')}
+                    previous={derivedMetric(filteredPrevRows, 'ticket')}
+                    format={formatMoney}
+                  />
+                  <ComparisonMetricCard
+                    title="Unidades por ticket"
+                    current={derivedMetric(filteredRows, 'units_per_ticket')}
+                    previous={derivedMetric(filteredPrevRows, 'units_per_ticket')}
+                    format={formatNum}
+                  />
+                  <ComparisonMetricCard
+                    title="Precio promedio"
+                    current={derivedMetric(filteredRows, 'avg_price')}
+                    previous={derivedMetric(filteredPrevRows, 'avg_price')}
+                    format={formatMoney}
+                  />
+                </section>
                 <SalesBreakdownNodeGraph
                   rows={hierarchyRows}
                   selectedSource={selectedSource}
@@ -407,6 +459,48 @@ function TabButton({
     >
       {label}
     </button>
+  );
+}
+
+function sumMetric(rows: HierarchyRow[], key: keyof HierarchyRow): number {
+  return rows.reduce((acc, r) => acc + toNum(r[key]), 0);
+}
+
+function derivedMetric(
+  rows: HierarchyRow[],
+  kind: 'ticket' | 'units_per_ticket' | 'avg_price',
+): number {
+  const revenue = sumMetric(rows, 'VENTA_TOTAL');
+  const tx = sumMetric(rows, 'TRANSACCIONES');
+  const units = sumMetric(rows, 'UNIDADES');
+  if (kind === 'ticket') return tx ? revenue / tx : 0;
+  if (kind === 'units_per_ticket') return tx ? units / tx : 0;
+  return units ? revenue / units : 0;
+}
+
+function ComparisonMetricCard({
+  title,
+  current,
+  previous,
+  format,
+}: {
+  title: string;
+  current: number;
+  previous: number;
+  format: (v: unknown) => string;
+}) {
+  const deltaPct = previous ? ((current - previous) / previous) * 100 : null;
+  const deltaColor =
+    deltaPct === null ? 'text-zinc-500' : deltaPct >= 0 ? 'text-emerald-400' : 'text-rose-400';
+  return (
+    <div className="rounded-xl border border-zinc-800 bg-zinc-900/40 p-3">
+      <p className="text-[10px] font-bold uppercase tracking-widest text-zinc-500">{title}</p>
+      <p className="mt-1 text-lg font-semibold text-zinc-100">{format(current)}</p>
+      <p className="text-[11px] text-zinc-500">Previo: {format(previous)}</p>
+      <p className={`text-[11px] font-semibold ${deltaColor}`}>
+        {deltaPct === null ? 'Sin base previa' : `${deltaPct >= 0 ? '+' : ''}${deltaPct.toFixed(1)}%`}
+      </p>
+    </div>
   );
 }
 
