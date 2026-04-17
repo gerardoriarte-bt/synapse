@@ -30,6 +30,9 @@ else
   git -C "$APP_DIR" pull
 fi
 
+# Meridian / MMM: solo documentación de planeación; no es runtime de Synapse ni debe quedar en el servidor.
+rm -f "$APP_DIR/docs/meridian-synapse-integration.md" || true
+
 echo "==> Backend"
 cd "$APP_DIR/backend"
 python3 -m venv .venv
