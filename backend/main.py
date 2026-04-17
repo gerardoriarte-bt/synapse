@@ -23,22 +23,6 @@ from services.cortex_threads import create_cortex_thread
 
 load_dotenv()
 
-
-def _query_mode() -> str:
-    m = os.getenv("SYNAPSE_QUERY_MODE", "cortex_analyst").strip().lower()
-    if m not in ("cortex_analyst", "legacy"):
-        return "cortex_analyst"
-    return m
-
-
-def _legacy_allowed() -> bool:
-    return os.getenv("SYNAPSE_ALLOW_LEGACY", "false").strip().lower() in (
-        "1",
-        "true",
-        "yes",
-    )
-
-
 app = FastAPI(title="Synapse API")
 
 # CORS
@@ -263,11 +247,8 @@ async def daily_dashboard_overview(
 @app.get("/api/health/cortex-analyst")
 async def cortex_analyst_health():
     """Valida configuración de Cortex Analyst (sin consumir la API de inferencia)."""
-    mode = _query_mode()
-    if mode != "cortex_analyst":
-        return {"mode": mode, "cortex_analyst_configured": False}
     v = validate_cortex_analyst_config()
-    return {"mode": mode, "cortex_analyst_configured": v["ok"], **v}
+    return {"mode": "cortex_analyst", "cortex_analyst_configured": v["ok"], **v}
 
 
 @app.post("/api/synapse/ask")
@@ -280,74 +261,57 @@ async def ask_synapse(request: QueryRequest, db: Session = Depends(get_db)):
 
         history = [{"q": c.query, "a": c.narrative} for c in reversed(past_interactions)]
 
-        mode = _query_mode()
-        if mode == "legacy" and not _legacy_allowed():
-            raise HTTPException(
-                status_code=400,
-                detail=(
-                    "Este despliegue está configurado para usar solo Snowflake Cortex (API REST). "
-                    "No está habilitado el motor legacy en Python (SQL + narrativa generados en código). "
-                    "Mantén SYNAPSE_QUERY_MODE=cortex_analyst. "
-                    "Solo en entornos de desarrollo explícitos: SYNAPSE_ALLOW_LEGACY=true."
-                ),
-            )
-        if mode == "cortex_analyst":
-            api_mode = os.getenv("CORTEX_API_MODE", "analyst").strip().lower()
-            use_threads = (
-                os.getenv("CORTEX_USE_AGENT_THREADS", "true").strip().lower()
-                in ("1", "true", "yes")
-                and api_mode == "agent_run"
-            )
-            if use_threads:
-                repo = CortexSessionRepository(db)
-                out_conversation_id: Optional[str] = None
-                agent_thread_id: Optional[int] = None
-                agent_parent_message_id: Optional[int] = None
-                if request.conversation_id:
-                    out_conversation_id = request.conversation_id
-                    sess = repo.get(request.conversation_id)
-                    if not sess or sess.user_id != request.user_id:
-                        raise HTTPException(
-                            status_code=400,
-                            detail="conversation_id inválido o expirado.",
-                        )
-                    agent_thread_id = int(sess.cortex_thread_id)
-                    if sess.last_assistant_message_id is None:
-                        agent_parent_message_id = 0
-                    else:
-                        agent_parent_message_id = int(sess.last_assistant_message_id)
-                else:
-                    out_conversation_id = str(uuid.uuid4())
-                    tid = create_cortex_thread()
-                    repo.create(
-                        session_id=out_conversation_id,
-                        user_id=request.user_id,
-                        tenant_id=request.tenant_id,
-                        cortex_thread_id=tid,
+        api_mode = os.getenv("CORTEX_API_MODE", "analyst").strip().lower()
+        use_threads = (
+            os.getenv("CORTEX_USE_AGENT_THREADS", "true").strip().lower()
+            in ("1", "true", "yes")
+            and api_mode == "agent_run"
+        )
+        if use_threads:
+            repo = CortexSessionRepository(db)
+            out_conversation_id: Optional[str] = None
+            agent_thread_id: Optional[int] = None
+            agent_parent_message_id: Optional[int] = None
+            if request.conversation_id:
+                out_conversation_id = request.conversation_id
+                sess = repo.get(request.conversation_id)
+                if not sess or sess.user_id != request.user_id:
+                    raise HTTPException(
+                        status_code=400,
+                        detail="conversation_id inválido o expirado.",
                     )
-                    agent_thread_id = tid
+                agent_thread_id = int(sess.cortex_thread_id)
+                if sess.last_assistant_message_id is None:
                     agent_parent_message_id = 0
-                response = process_with_cortex_analyst(
-                    request.query,
-                    history,
-                    agent_thread_id=agent_thread_id,
-                    agent_parent_message_id=agent_parent_message_id,
-                    conversation_id=out_conversation_id,
-                )
-                last_mid = None
-                if response.cortex_analyst and isinstance(
-                    response.cortex_analyst, dict
-                ):
-                    last_mid = response.cortex_analyst.get("last_assistant_message_id")
-                if isinstance(last_mid, int) and out_conversation_id:
-                    repo.update_last_assistant(out_conversation_id, last_mid)
+                else:
+                    agent_parent_message_id = int(sess.last_assistant_message_id)
             else:
-                response = process_with_cortex_analyst(request.query, history)
+                out_conversation_id = str(uuid.uuid4())
+                tid = create_cortex_thread()
+                repo.create(
+                    session_id=out_conversation_id,
+                    user_id=request.user_id,
+                    tenant_id=request.tenant_id,
+                    cortex_thread_id=tid,
+                )
+                agent_thread_id = tid
+                agent_parent_message_id = 0
+            response = process_with_cortex_analyst(
+                request.query,
+                history,
+                agent_thread_id=agent_thread_id,
+                agent_parent_message_id=agent_parent_message_id,
+                conversation_id=out_conversation_id,
+            )
+            last_mid = None
+            if response.cortex_analyst and isinstance(
+                response.cortex_analyst, dict
+            ):
+                last_mid = response.cortex_analyst.get("last_assistant_message_id")
+            if isinstance(last_mid, int) and out_conversation_id:
+                repo.update_last_assistant(out_conversation_id, last_mid)
         else:
-            from services.snowflake import SnowflakeService
-
-            agent = SnowflakeService(tenant_id=request.tenant_id)
-            response = agent.process_query(request.query, history=history)
+            response = process_with_cortex_analyst(request.query, history)
 
         # 3. Persistir en Postgres
         new_conv = Conversation(

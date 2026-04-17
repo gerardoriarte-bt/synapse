@@ -55,8 +55,8 @@ class SnowflakeDailyAnalyticsRepository:
     """Lecturas agregadas desde Gold para el dashboard operativo diario."""
 
     def __init__(self) -> None:
-        self._gold_db = _gold_fq_ident("SNOWFLAKE_GOLD_DATABASE", "DB_BT_UA")
-        self._gold_schema = _gold_fq_ident("SNOWFLAKE_GOLD_SCHEMA", "BT_UA_MART_ANALYTICS")
+        self._gold_db = _gold_fq_ident("SNOWFLAKE_GOLD_DATABASE", "DB_BT_TERPEL_COMBS")
+        self._gold_schema = _gold_fq_ident("SNOWFLAKE_GOLD_SCHEMA", "BT_TERPEL_COMBS_MART_ANALYTICS")
         self._fct = _gold_fq_ident("SYNAPSE_DASHBOARD_FCT_TABLE", "FCT_PERFORMANCE")
         self._product_table = _gold_fq_ident(
             "SYNAPSE_DASHBOARD_PRODUCT_SALES_TABLE", "VENTAS_PRODUCTOS_FUENTE"
@@ -251,7 +251,7 @@ class SnowflakeDailyAnalyticsRepository:
     def fetch_active_campaigns_detail(
         self, start: date, end: date, row_cap: int
     ) -> List[Dict[str, Any]]:
-        """Campañas con actividad en el rango (misma lógica de 'activas' que el servicio legacy)."""
+        """Campañas con actividad en el rango (filtro por métricas > 0 en FCT configurada)."""
         sql = f"""
             SELECT
                 COALESCE(FUENTE, 'SIN_FUENTE') AS FUENTE,

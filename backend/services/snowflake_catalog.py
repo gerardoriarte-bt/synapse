@@ -1,5 +1,5 @@
 """
-Catálogo de tablas/vistas Gold en DB_BT_UA.BT_UA_MART_ANALYTICS (alineado al inventario DATA_STRUCTURE).
+Catálogo de tablas/vistas en el mart (por defecto DB_BT_TERPEL_COMBS.BT_TERPEL_COMBS_MART_ANALYTICS).
 Solo identificadores en mayúsculas; el SQL se arma con comillas en el servicio.
 """
 from __future__ import annotations
@@ -10,6 +10,39 @@ from typing import Dict, List, Sequence, Tuple
 
 # (tabla_o_vista, keywords para scoring, peso base por match)
 GOLD_DATASETS: List[Tuple[str, Sequence[str], float]] = [
+    (
+        "VW_DATATERPEL_PAUTA_METAS_VS_RESULTADOS",
+        (
+            "META",
+            "METAS",
+            "RESULTADO",
+            "RESULTADOS",
+            "PAUTA",
+            "KPI",
+            "TERPEL",
+            "OBJETIVO",
+            "TARGET",
+            "BENCHMARK",
+            "DESEMPE",
+            "VS ",
+        ),
+        1.15,
+    ),
+    (
+        "PAID_MEDIA_CHUNKS",
+        ("PAID", "PAGAD", "MEDIA", "CHUNK", "PAUTA", "ANUNCIO", "CAMPAÑA", "CAMPAIGN", "DISPLAY"),
+        1.05,
+    ),
+    (
+        "PAID_MEDIA_TEXTO_RAW",
+        ("REPORTE", "TEXTO", "PAID", "PDF", "MEDIOS", "INSIGHT"),
+        0.95,
+    ),
+    (
+        "ORGANIC_SM_CHUNKS",
+        ("ORGÁNICO", "ORGANICO", "SOCIAL", "INSTAGRAM", "FACEBOOK", "COMMUNITY", "ORGANIC"),
+        1.0,
+    ),
     ("FCT_PERFORMANCE", ("ROAS", "GASTO", "COST", "PERFORMANCE", "PAUTA", "ADS", "ECOM", "INGRESO", "REVENUE", "CONVERSI", "CLICK", "IMPRESION", "CAMPAÑA", "CAMPAIGN", "FUENTE", "PLATAFORMA"), 1.0),
     ("GLD_PAID_MEDIA", ("PAID", "PAGAD", "MEDIA", "PAUTA", "CONSOLIDAD", "ATRIBU", "PERFORMANCE", "BRAND", "SCOPE"), 1.1),
     ("GLD_ATRIBUCION_CONSOLIDADA", ("ATRIBU", "ATTRIBUTION", "CONSOLIDAD", "ADOBE", "WEB"), 1.0),
@@ -46,13 +79,15 @@ GOLD_DATASETS: List[Tuple[str, Sequence[str], float]] = [
     ("SOV_CHUNKS", ("SOV", "SHARE OF VOICE", "PARTICIPACIÓN", "MERCADO"), 0.95),
 ]
 
-# Cuando la pregunta no matchea keywords, se priorizan vistas/tablas anchas con datos operativos.
+# Cuando la pregunta no matchea keywords, se priorizan objetos presentes en el mart Terpel por defecto.
 DEFAULT_DATASET_ORDER: Tuple[str, ...] = (
-    "GLD_PAID_MEDIA",
+    "VW_DATATERPEL_PAUTA_METAS_VS_RESULTADOS",
+    "PAID_MEDIA_CHUNKS",
+    "PAID_MEDIA_TEXTO_RAW",
+    "FORMULAS_MARKETING",
+    "ORGANIC_SM_CHUNKS",
     "FCT_PERFORMANCE",
-    "RESULTADOS_PLATAFORMA_SITIO_WEB",
-    "VW_ECOMM_DAILY_SOT",
-    "SV_SYNAPSE_UA_ANALYTICS",
+    "GLD_PAID_MEDIA",
 )
 
 # Tablas muy grandes: muestreo para no full-scan.

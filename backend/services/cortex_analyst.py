@@ -428,6 +428,12 @@ def _extract_assistant_message_id_from_agent_response(body: Dict[str, Any]) -> O
     return None
 
 
+# Terpel: vista semántica por defecto si no hay CORTEX_ANALYST_SEMANTIC_* en env.
+DEFAULT_CORTEX_SEMANTIC_VIEW = (
+    "DB_BT_TERPEL_COMBS.BT_TERPEL_COMBS_MART_ANALYTICS.SYNAPSE_TERPEL_COMBUSTIBLES"
+)
+
+
 def _semantic_payload() -> Dict[str, Any]:
     view = os.getenv("CORTEX_ANALYST_SEMANTIC_VIEW", "").strip()
     model_file = os.getenv("CORTEX_ANALYST_SEMANTIC_MODEL_FILE", "").strip()
@@ -448,11 +454,7 @@ def _semantic_payload() -> Dict[str, Any]:
     if model_file:
         return {"semantic_model_file": model_file}
 
-    raise ValueError(
-        "Configura uno de: CORTEX_ANALYST_SEMANTIC_VIEW (ej. DB.SCHEMA.MI_VISTA_SEMANTICA), "
-        "CORTEX_ANALYST_SEMANTIC_MODEL_FILE (ej. @DB.SCHEMA.STAGE/model.yaml), "
-        "o CORTEX_ANALYST_SEMANTIC_MODELS_JSON (array de semantic_view / semantic_model_file)."
-    )
+    return {"semantic_view": DEFAULT_CORTEX_SEMANTIC_VIEW}
 
 
 def _parse_analyst_body(body: Dict[str, Any]) -> Tuple[str, Optional[str], List[str], Dict[str, Any]]:
@@ -890,7 +892,16 @@ def call_cortex_analyst_api(
         return _post_json(url, payload)
     except HTTPError as e:
         err_body = e.read().decode("utf-8", errors="replace") if e.fp else ""
-        raise RuntimeError(f"Cortex Analyst HTTP {e.code}: {err_body or e.reason}") from e
+        hint = ""
+        if e.code in (400, 401, 403, 404) and err_body and "Semantic View" in err_body:
+            hint = (
+                " Comprueba en el despliegue: CORTEX_ANALYST_SEMANTIC_VIEW, "
+                "CORTEX_ANALYST_SEMANTIC_MODELS_JSON o CORTEX_ANALYST_SEMANTIC_MODEL_FILE "
+                "deben apuntar a un objeto que exista en Snowflake (por defecto en código: "
+                f"{DEFAULT_CORTEX_SEMANTIC_VIEW}). "
+                "Si usas agent_run con agente nombrado, revisa también SNOWFLAKE_AGENT_NAME."
+            )
+        raise RuntimeError(f"Cortex Analyst HTTP {e.code}: {err_body or e.reason}{hint}") from e
     except URLError as e:
         raise RuntimeError(f"Cortex Analyst red: {e.reason}") from e
 

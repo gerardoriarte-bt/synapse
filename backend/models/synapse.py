@@ -31,7 +31,7 @@ class SynapseResponse(BaseModel):
     chart_config: Optional[ChartConfig] = None
     raw_data: Optional[List[Dict]] = None
     decision_meta: Optional[DecisionMeta] = None
-    # Metadatos opcionales cuando SYNAPSE_QUERY_MODE=cortex_analyst (SQL generado, avisos, etc.)
+    # Metadatos opcionales de Cortex Analyst / Agent (SQL generado, avisos, etc.)
     cortex_analyst: Optional[Dict[str, Any]] = None
     # Reenviar en el siguiente POST /api/synapse/ask para continuidad en Cortex Agent (hilos)
     conversation_id: Optional[str] = None
